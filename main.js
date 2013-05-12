@@ -1,7 +1,7 @@
 // ==UserScript==
 // @id             ingress-intel-total-conversion@jonatkins
 // @name           IITC: Ingress intel map total conversion
-// @version        0.10.0.@@DATETIMEVERSION@@
+// @version        0.12.0.@@DATETIMEVERSION@@
 // @namespace      https://github.com/jonatkins/ingress-intel-total-conversion
 // @updateURL      @@UPDATEURL@@
 // @downloadURL    @@DOWNLOADURL@@
@@ -61,7 +61,8 @@ document.getElementsByTagName('head')[0].innerHTML = ''
   + '<style>@@INCLUDESTRING:style.css@@</style>'
   + '<style>@@INCLUDESTRING:external/leaflet.css@@</style>'
 //note: smartphone.css injection moved into code/smartphone.js
-  + '<link rel="stylesheet" type="text/css" href="https://fonts.googleapis.com/css?family=Coda"/>';
+  + '<link rel="stylesheet" type="text/css" href="//fonts.googleapis.com/css?family=Coda"/>'
+  + '<link rel="stylesheet" type="text/css" href="//fonts.googleapis.com/css?family=Roboto"/>';
 
 document.getElementsByTagName('body')[0].innerHTML = ''
   + '<div id="map">Loading, please wait</div>'
@@ -85,16 +86,19 @@ document.getElementsByTagName('body')[0].innerHTML = ''
   + '  <div id="sidebar" style="display: none">'
   + '    <div id="playerstat">t</div>'
   + '    <div id="gamestat">&nbsp;loading global control stats</div>'
-  + '    <input id="geosearch" placeholder="Search location…" type="text"/>'
+  + '    <div id="geosearchwrapper">'
+  + '      <input id="geosearch" placeholder="Search location…" type="text"/>'
+  + '      <img src="@@INCLUDEIMAGE:images/current-location.png@@"/ title="Current Location">'
+  + '    </div>'
   + '    <div id="portaldetails"></div>'
   + '    <input id="redeem" placeholder="Redeem code…" type="text"/>'
   + '    <div id="toolbox">'
-  + '      <a onmouseover="setPermaLink(this)" onclick="setPermaLink(this);return androidCopy(this.href)" >permalink</a>'
-  + '      <a href="http://iitc.jonatkins.com/" title="IITC = Ingress Intel Total Conversion.\n\nOn the script’s homepage you can:\n– find updates\n– get plugins\n– report bugs\n– and contribute." style="cursor: help">IITC’s page</a></div>'
+  + '      <a onmouseover="setPermaLink(this)" onclick="setPermaLink(this);return androidCopy(this.href)" title="URL link to this map view">Permalink</a>'
+  + '      <a onclick="window.aboutIITC()" style="cursor: help">About IITC</a>'
+  + '    </div>'
   + '  </div>'
   + '</div>'
-  + '<div id="updatestatus"></div>'
-  + '<div id="dialog"></div>';
+  + '<div id="updatestatus"></div>';
 
 // putting everything in a wrapper function that in turn is placed in a
 // script tag on the website allows us to execute in the site’s context
@@ -108,8 +112,10 @@ function wrapper() {
 L_PREFER_CANVAS = false;
 
 // CONFIG OPTIONS ////////////////////////////////////////////////////
-window.REFRESH = 30; // refresh view every 30s (base time)
+window.REFRESH = 60; // refresh view every 60s (base time)
 window.ZOOM_LEVEL_ADJ = 5; // add 5 seconds per zoom level
+window.ON_MOVE_REFRESH = 1.25;  //refresh time to use after a movement event
+window.MINIMUM_OVERRIDE_REFRESH = 5; //limit on refresh time since previous refresh, limiting repeated move refresh rate
 window.REFRESH_GAME_SCORE = 5*60; // refresh game score every 5 minutes
 window.MAX_IDLE_TIME = 4; // stop updating map after 4min idling
 window.PRECACHE_PLAYER_NAMES_ZOOM = 17; // zoom level to start pre-resolving player names
@@ -129,7 +135,7 @@ window.VIEWPORT_PAD_RATIO = 0.3;
 
 // how many items to request each query
 window.CHAT_PUBLIC_ITEMS = 200;
-window.CHAT_FACTION_ITEMS = 50;
+window.CHAT_FACTION_ITEMS = 100;
 // how many pixels to the top before requesting new data
 window.CHAT_REQUEST_SCROLL_TOP = 200;
 window.CHAT_SHRINKED = 60;
@@ -147,7 +153,7 @@ window.FIELD_MU_DISPLAY_AREA_ZOOM_RATIO = 0.001;
 window.FIELD_MU_DISPLAY_POINT_TOLERANCE = 60
 
 window.COLOR_SELECTED_PORTAL = '#f00';
-window.COLORS = ['#FFCE00', '#0088FF', '#03DC03']; // none, res, enl
+window.COLORS = ['#a0a0a0', '#0088FF', '#03DC03']; // none, res, enl
 window.COLORS_LVL = ['#000', '#FECE5A', '#FFA630', '#FF7315', '#E40000', '#FD2992', '#EB26CD', '#C124E0', '#9627F4'];
 window.COLORS_MOD = {VERY_RARE: '#F78AF6', RARE: '#AD8AFF', COMMON: '#84FBBD'};
 
@@ -168,7 +174,7 @@ window.RANGE_INDICATOR_COLOR = 'red'
 window.PORTAL_RADIUS_ENLARGE_MOBILE = 5;
 
 
-window.DEFAULT_PORTAL_IMG = 'https://commondatastorage.googleapis.com/ingress/img/default-portal-image.png';
+window.DEFAULT_PORTAL_IMG = '//commondatastorage.googleapis.com/ingress/img/default-portal-image.png';
 window.NOMINATIM = 'http://nominatim.openstreetmap.org/search?format=json&limit=1&q=';
 
 // INGRESS CONSTANTS /////////////////////////////////////////////////
@@ -227,6 +233,10 @@ window.portals = {};
 window.links = {};
 window.fields = {};
 window.resonators = {};
+
+// contain current status(on/off) of overlay layerGroups.
+// But you should use isLayerGroupDisplayed(name) to check the status
+window.overlayStatus = {};
 
 // plugin framework. Plugins may load earlier than iitc, so don’t
 // overwrite data

@@ -1,9 +1,10 @@
-
 // SETUP /////////////////////////////////////////////////////////////
 // these functions set up specific areas after the boot function
 // created a basic framework. All of these functions should only ever
 // be run once.
 
+// Used to disable on multitouch devices
+window.showZoom = true;
 
 window.setupBackButton = function() {
   var c = window.isSmartphone()
@@ -26,25 +27,23 @@ window.setupBackButton = function() {
   }
 }
 
-
-
-
 window.setupLargeImagePreview = function() {
   $('#portaldetails').on('click', '.imgpreview', function() {
-    var ex = $('#largepreview');
-    if(ex.length > 0) {
-      ex.remove();
-      return;
-    }
     var img = $(this).find('img')[0];
-    var w = img.naturalWidth/2;
-    var h = img.naturalHeight/2;
-    var c = $('#portaldetails').attr('class');
-    $('body').append(
-      '<div id="largepreview" class="'+c+'" style="margin-left: '+(-SIDEBAR_WIDTH/2-w-2)+'px; margin-top: '+(-h-2)+'px">' + img.outerHTML + '</div>'
-    );
-    $('#largepreview').click(function() { $(this).remove() });
-  });
+    var w = img.naturalWidth, c = $('#portaldetails').attr('class');
+    var d = dialog({
+      html: '<span class="' + c + '" style="position: relative; width: 100%; left: 50%; margin-left: ' + -(w / 2) + 'px;">' + img.outerHTML + '</span>',
+      title: $(this).parent().find('h3.title').html()
+    });
+
+    // We have to dynamically set the width of this dialog, so get the .ui-dialog component
+    var p = d.parents('.ui-dialog');
+
+    // Don't let this dialog get smaller than the default maximum dialog width
+    var width = Math.max(parseInt(p.css('max-width')), w);
+    p.css('min-width', width + 'px');
+    p.css('width', width + 'px');
+   });
 }
 
 // adds listeners to the layer chooser such that a long press hides
@@ -84,6 +83,26 @@ window.setupLayerChooserSelectOne = function() {
   });
 }
 
+// Setup the function to record the on/off status of overlay layerGroups
+window.setupLayerChooserStatusRecorder = function() {
+  // Record already added layerGroups
+  $.each(window.layerChooser._layers, function(ind, chooserEntry) {
+    if(!chooserEntry.overlay) return true;
+    var display = window.map.hasLayer(chooserEntry.layer);
+    window.updateDisplayedLayerGroup(chooserEntry.name, display);
+  });
+
+  // Record layerGroups change
+  window.map.on('layeradd layerremove', function(e) {
+    var id = L.stamp(e.layer);
+    var layerGroup = this._layers[id];
+    if (layerGroup && layerGroup.overlay) {
+      var display = (e.type === 'layeradd');
+      window.updateDisplayedLayerGroup(layerGroup.name, display);
+    }
+  }, window.layerChooser);
+}
+
 window.setupStyles = function() {
   $('head').append('<style>' +
     [ '#largepreview.enl img { border:2px solid '+COLORS[TEAM_ENL]+'; } ',
@@ -103,22 +122,45 @@ window.setupStyles = function() {
 window.setupMap = function() {
   $('#map').text('');
 
-  var osmOpt = {attribution: 'Map data © OpenStreetMap contributors', maxZoom: 18, detectRetina: true};
-  var osm = new L.TileLayer('http://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', osmOpt);
+  //OpenStreetMap attribution - required by several of the layers
+  osmAttribution = 'Map data © OpenStreetMap contributors';
 
-  var cmOpt = {attribution: 'Map data © OpenStreetMap contributors, Imagery © CloudMade', maxZoom: 18, detectRetina: true};
-  var cmMin = new L.TileLayer('http://{s}.tile.cloudmade.com/654cef5fd49a432ab81267e200ecc502/22677/256/{z}/{x}/{y}.png', cmOpt);
-  var cmMid = new L.TileLayer('http://{s}.tile.cloudmade.com/654cef5fd49a432ab81267e200ecc502/999/256/{z}/{x}/{y}.png', cmOpt);
+  //OpenStreetMap tiles - we shouldn't use these by default, or even an option - https://wiki.openstreetmap.org/wiki/Tile_usage_policy
+  // "Heavy use (e.g. distributing an app that uses tiles from openstreetmap.org) is forbidden without prior permission from the System Administrators"
+  //var osmOpt = {attribution: osmAttribution, maxZoom: 18, detectRetina: true};
+  //var osm = new L.TileLayer('http://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', osmOpt);
 
-  var views = [cmMid, cmMin, osm, new L.Google('INGRESS'), new L.Google('ROADMAP'),
-               new L.Google('SATELLITE'), new L.Google('HYBRID')];
+  //CloudMade layers - only 500,000 tiles/month in their free plan. nowhere near enough for IITC
+  var cmOpt = {attribution: osmAttribution+', Imagery © CloudMade', maxZoom: 18, detectRetina: true};
+  //var cmMin = new L.TileLayer('http://{s}.tile.cloudmade.com/{your api key here}/22677/256/{z}/{x}/{y}.png', cmOpt);
+  //var cmMid = new L.TileLayer('http://{s}.tile.cloudmade.com/{your api key here}/999/256/{z}/{x}/{y}.png', cmOpt);
+
+  //MapQuest offer tiles - http://developer.mapquest.com/web/products/open/map
+  //their usage policy has no limits (except required notification above 4000 tiles/sec - we're perhaps at 50 tiles/sec based on CloudMade stats)
+  var mqSubdomains = [ 'otile1','otile2', 'otile3', 'otile4' ];
+  var mqTileUrlPrefix = window.location.protocol !== 'https:' ? 'http://{s}.mqcdn.com' : 'https://{s}-s.mqcdn.com';
+  var mqMapOpt = {attribution: osmAttribution+', Tiles Courtesy of MapQuest', maxZoom: 18, subdomains: mqSubdomains};
+  var mqMap = new L.TileLayer(mqTileUrlPrefix+'/tiles/1.0.0/map/{z}/{x}/{y}.jpg',mqMapOpt);
+  //MapQuest satellite coverage outside of the US is rather limited - so not really worth having as we have google as an option
+  //var mqSatOpt = {attribution: 'Portions Courtesy NASA/JPL-Caltech and U.S. Depart. of Agriculture, Farm Service Agency', mazZoom: 18, subdomains: mqSubdomains};
+  //var mqSat = new L.TileLayer('http://{s}.mqcdn.com/tiles/1.0.0/sat/{z}/{x}/{y}.jpg',mqSatOpt);
+
+  var views = [
+    /*0*/ mqMap,
+    /*1*/ new L.Google('INGRESS',{maxZoom:20}),
+    /*2*/ new L.Google('ROADMAP',{maxZoom:20}),
+    /*3*/ new L.Google('SATELLITE',{maxZoom:20}),
+    /*4*/ new L.Google('HYBRID',{maxZoom:20}),
+    /*5*/ new L.Google('TERRAIN',{maxZoom:15})
+  ];
 
 
   window.map = new L.Map('map', $.extend(getPosition(),
-    {zoomControl: true}
+    {zoomControl: window.showZoom}
   ));
 
   var addLayers = {};
+  var hiddenLayer = [];
 
   portalsLayers = [];
   for(var i = 0; i <= 8; i++) {
@@ -126,25 +168,34 @@ window.setupMap = function() {
     map.addLayer(portalsLayers[i]);
     var t = (i === 0 ? 'Unclaimed' : 'Level ' + i) + ' Portals';
     addLayers[t] = portalsLayers[i];
+    // Store it in hiddenLayer to remove later
+    if(!isLayerGroupDisplayed(t, true)) hiddenLayer.push(portalsLayers[i]);
   }
 
   fieldsLayer = L.layerGroup([]);
   map.addLayer(fieldsLayer, true);
   addLayers['Fields'] = fieldsLayer;
+  // Store it in hiddenLayer to remove later
+  if(!isLayerGroupDisplayed('Fields', true)) hiddenLayer.push(fieldsLayer);
 
   linksLayer = L.layerGroup([]);
   map.addLayer(linksLayer, true);
   addLayers['Links'] = linksLayer;
+  // Store it in hiddenLayer to remove later
+  if(!isLayerGroupDisplayed('Links', true)) hiddenLayer.push(linksLayer);
 
   window.layerChooser = new L.Control.Layers({
-    'OSM Midnight': views[0],
-    'OSM Minimal': views[1],
-    'OSM Mapnik': views[2],
-    'Default Ingress Map': views[3],
-    'Google Roads':  views[4],
-    'Google Satellite':  views[5],
-    'Google Hybrid':  views[6]
+    'MapQuest OSM': views[0],
+    'Default Ingress Map': views[1],
+    'Google Roads':  views[2],
+    'Google Satellite':  views[3],
+    'Google Hybrid':  views[4],
+    'Google Terrain': views[5]
     }, addLayers);
+  // Remove the hidden layer after layerChooser built, to avoid messing up ordering of layers 
+  $.each(hiddenLayer, function(ind, layer){
+    map.removeLayer(layer);
+  });
 
   map.addControl(window.layerChooser);
 
@@ -152,7 +203,8 @@ window.setupMap = function() {
   // layers. This likely leads to broken layer selection because the
   // views/cookie order does not match the layer chooser order.
   try {
-    map.addLayer(views[readCookie('ingress.intelmap.type')]);
+    convertCookieToLocalStorage('ingress.intelmap.type');
+    map.addLayer(views[localStorage['ingress.intelmap.type']]);
   } catch(e) { map.addLayer(views[0]); }
 
   map.attributionControl.setPrefix('');
@@ -177,7 +229,7 @@ window.setupMap = function() {
 
   map.on('baselayerchange', function () {
     var selInd = $('[name=leaflet-base-layers]:checked').parent().index();
-    writeCookie('ingress.intelmap.type', selInd);
+    localStorage['ingress.intelmap.type']=selInd;
   });
 
   // map update status handling
@@ -185,15 +237,17 @@ window.setupMap = function() {
   map.on('moveend zoomend', function() { window.mapRunsUserAction = false });
 
   // update map hooks
-  map.on('movestart zoomstart', window.requests.abort);
-  map.on('moveend zoomend', function() { window.startRefreshTimeout(500) });
-
-  // run once on init
-  window.requestData();
-  window.startRefreshTimeout();
+  map.on('movestart zoomstart', function() { window.requests.abort(); window.startRefreshTimeout(-1); });
+  map.on('moveend zoomend', function() { window.startRefreshTimeout(ON_MOVE_REFRESH*1000) });
 
   window.addResumeFunction(window.requestData);
   window.requests.addRefreshFunction(window.requestData);
+
+  // start the refresh process with a small timeout, so the first data request happens quickly
+  // (the code originally called the request function directly, and triggered a normal delay for the nxt refresh.
+  //  however, the moveend/zoomend gets triggered on map load, causing a duplicate refresh. this helps prevent that
+  window.startRefreshTimeout(ON_MOVE_REFRESH*1000);
+
 };
 
 // renders player details into the website. Since the player info is
@@ -231,7 +285,7 @@ window.setupPlayerStat = function() {
     + '<h2 title="'+t+'">'+level+'&nbsp;'
     + '<div id="name">'
     + '<span class="'+cls+'">'+PLAYER.nickname+'</span>'
-    + '<a href="https://www.ingress.com/_ah/logout?continue=https://www.google.com/accounts/Logout%3Fcontinue%3Dhttps://appengine.google.com/_ah/logout%253Fcontinue%253Dhttps://www.ingress.com/intel%26service%3Dah" id="signout">sign out</a>'
+    + '<a href="/_ah/logout?continue=https://www.google.com/accounts/Logout%3Fcontinue%3Dhttps://appengine.google.com/_ah/logout%253Fcontinue%253Dhttps://www.ingress.com/intel%26service%3Dah" id="signout">sign out</a>'
     + '</div>'
     + '<div id="stats">'
     + '<sup>XM: '+xmRatio+'%</sup>'
@@ -286,21 +340,6 @@ window.setupTooltips = function(element) {
   }
 }
 
-window.setupDialogs = function() {
-  $('#dialog').dialog({
-    autoOpen: false,
-    modal: true,
-    buttons: [
-      { text: 'OK', click: function() { $(this).dialog('close'); } }
-    ]
-  });
-
-  window.alert = function(text, isHTML) {
-    var h = isHTML ? text : window.convertTextToTableMagic(text);
-    $('#dialog').html(h).dialog('open');
-  }
-}
-
 window.setupTaphold = function() {
   @@INCLUDERAW:external/taphold.js@@
 }
@@ -321,7 +360,7 @@ function boot() {
   window.runOnSmartphonesBeforeBoot();
 
   var iconDefImage = '@@INCLUDEIMAGE:images/marker-icon.png@@';
-  var iconDefRetImage = '@@INCLUDEIMAGE:images/marker-icon_2x.png@@';
+  var iconDefRetImage = '@@INCLUDEIMAGE:images/marker-icon-2x.png@@';
   var iconShadowImage = '@@INCLUDEIMAGE:images/marker-shadow.png@@';
 
   L.Icon.Default = L.Icon.extend({options: {
@@ -349,9 +388,15 @@ function boot() {
   window.chat.setup();
   window.setupQRLoadLib();
   window.setupLayerChooserSelectOne();
+  window.setupLayerChooserStatusRecorder();
   window.setupBackButton();
   // read here ONCE, so the URL is only evaluated one time after the
   // necessary data has been loaded.
+  urlPortalLL = getURLParam('pll');
+  if(urlPortalLL) {
+    urlPortalLL = urlPortalLL.split(",");
+    urlPortalLL = [parseFloat(urlPortalLL[0]) || 0.0, parseFloat(urlPortalLL[1]) || 0.0];
+  }
   urlPortal = getURLParam('pguid');
 
   // load only once
@@ -361,7 +406,13 @@ function boot() {
   $('#sidebar').show();
 
   if(window.bootPlugins)
-    $.each(window.bootPlugins, function(ind, ref) { ref(); });
+    $.each(window.bootPlugins, function(ind, ref) {
+      try {
+        ref();
+      } catch(err) {
+        console.log("error starting plugin: index "+ind+", error: "+err);
+      }
+    });
 
   window.runOnSmartphonesAfterBoot();
 
@@ -369,6 +420,7 @@ function boot() {
   setTimeout('window.map.invalidateSize(false);', 500);
 
   window.iitcLoaded = true;
+  window.runHooks('iitcLoaded');
 }
 
 // this is the minified load.js script that allows us to easily load
@@ -386,6 +438,7 @@ try { console.log('Loading included JS now'); } catch(e) {}
 
 try { console.log('done loading included JS'); } catch(e) {}
 
+//note: no protocol - so uses http or https as used on the current page
 var JQUERY = 'https://ajax.googleapis.com/ajax/libs/jquery/1.7.1/jquery.min.js';
 var JQUERYUI = 'https://ajax.googleapis.com/ajax/libs/jqueryui/1.10.0/jquery-ui.min.js';
 

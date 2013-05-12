@@ -1,7 +1,7 @@
 // ==UserScript==
 // @id             iitc-plugin-player-tracker@breunigs
 // @name           IITC Plugin: Player tracker
-// @version        0.9.2.@@DATETIMEVERSION@@
+// @version        0.9.3.@@DATETIMEVERSION@@
 // @namespace      https://github.com/jonatkins/ingress-intel-total-conversion
 // @updateURL      @@UPDATEURL@@
 // @downloadURL    @@DOWNLOADURL@@
@@ -33,9 +33,9 @@ window.plugin.playerTracker.setup = function() {
   try { console.log('done loading OverlappingMarkerSpiderfier JS'); } catch(e) {}
 
   var iconEnlImage = '@@INCLUDEIMAGE:images/marker-green.png@@';
-  var iconEnlRetImage = '@@INCLUDEIMAGE:images/marker-green_2x.png@@';
+  var iconEnlRetImage = '@@INCLUDEIMAGE:images/marker-green-2x.png@@';
   var iconResImage = '@@INCLUDEIMAGE:images/marker-blue.png@@';
-  var iconResRetImage = '@@INCLUDEIMAGE:images/marker-blue_2x.png@@';
+  var iconResRetImage = '@@INCLUDEIMAGE:images/marker-blue-2x.png@@';
 
   plugin.playerTracker.iconEnl = L.Icon.Default.extend({options: {
     iconUrl: iconEnlImage,
@@ -49,6 +49,14 @@ window.plugin.playerTracker.setup = function() {
   plugin.playerTracker.drawnTraces = new L.LayerGroup();
   window.layerChooser.addOverlay(plugin.playerTracker.drawnTraces, 'Player Tracker');
   map.addLayer(plugin.playerTracker.drawnTraces);
+  map.on('layeradd',function(obj) {
+    if(obj.layer === plugin.playerTracker.drawnTraces)
+    {
+      obj.layer.eachLayer(function(marker) {
+        if(marker._icon) window.setupTooltips($(marker._icon));
+      });
+    }
+  });
   plugin.playerTracker.oms = new OverlappingMarkerSpiderfier(map);
   plugin.playerTracker.oms.legColors = {'usual': '#FFFF00', 'highlighted': '#FF0000'};
   plugin.playerTracker.oms.legWeight = 3.5;
@@ -62,6 +70,8 @@ window.plugin.playerTracker.setup = function() {
     window.plugin.playerTracker.zoomListener();
   });
   window.plugin.playerTracker.zoomListener();
+  
+  plugin.playerTracker.setupUserSearch();
 }
 
 window.plugin.playerTracker.stored = {};
@@ -269,6 +279,8 @@ window.plugin.playerTracker.drawData = function() {
           + playerLevel
           + (playerLevel < (window.MAX_XM_PER_LEVEL.length - 1) ? ' (guessed)' : '')
           + '</span>';
+      } else {
+        title += '<span style="font-weight:bold;margin-left:10px;">Level unknown</span>'
       }
     }
     
@@ -341,8 +353,58 @@ window.plugin.playerTracker.handleData = function(data) {
   plugin.playerTracker.drawData();
 }
 
+window.plugin.playerTracker.findUserPosition = function(nick) {
+  nick = nick.toLowerCase();
+  var foundPlayerData = undefined;
+  $.each(plugin.playerTracker.stored, function(pguid, playerData) {
+    if (playerData.nick.toLowerCase() === nick) {
+      foundPlayerData = playerData;
+      return false;
+    }
+  });
+  
+  if (!foundPlayerData) {
+    return false;
+  }
+  
+  var evtsLength = foundPlayerData.events.length;
+  var last = foundPlayerData.events[evtsLength-1];
+  return plugin.playerTracker.getLatLngFromEvent(last);
+}
 
+window.plugin.playerTracker.centerMapOnUser = function(nick) {
+  var position = plugin.playerTracker.findUserPosition(nick);
+  
+  if (position === false) {
+    return false;
+  }
+  
+  if(window.isSmartphone()) window.smartphone.mapButton.click();
+  window.map.setView(position, map.getZoom());
+}
 
+window.plugin.playerTracker.onNicknameClicked = function(info) {
+  if (info.event.ctrlKey) {
+    plugin.playerTracker.centerMapOnUser(info.nickname);
+    return false;
+  }
+}
+
+window.plugin.playerTracker.onGeoSearch = function(search) {
+  if (/^@/.test(search)) {
+    plugin.playerTracker.centerMapOnUser(search.replace(/^@/, ''));
+    return false;
+  }
+}
+
+window.plugin.playerTracker.setupUserSearch = function() {
+  addHook('nicknameClicked', window.plugin.playerTracker.onNicknameClicked);
+  addHook('geoSearch', window.plugin.playerTracker.onGeoSearch);
+  
+  var geoSearch = $('#geosearch');
+  var beforeEllipsis = /(.*)…/.exec(geoSearch.attr('placeholder'))[1];
+  geoSearch.attr('placeholder', beforeEllipsis + ' or @player…');
+}
 
 
 var setup = plugin.playerTracker.setup;
