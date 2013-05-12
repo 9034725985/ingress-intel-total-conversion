@@ -1,6 +1,39 @@
-
-
 // UTILS + MISC  ///////////////////////////////////////////////////////
+
+window.aboutIITC = function(){
+  var v = '@@BUILDNAME@@-@@BUILDDATE@@';
+  var attrib = '@@INCLUDEMD:ATTRIBUTION.md@@';
+  var contrib = '@@INCLUDEMD:CONTRIBS.md@@'
+  var a = ''
+  + '  <div><b>About IITC</b></div> '
+  + '  <div>Ingress Intel Total Conversion</div> '
+  + '  <hr>'
+  + '  <div>'
+  + '    <a href="http://iitc.jonatkins.com/" target="_blank">IITC Homepage</a><br />'
+  + '     On the script’s homepage you can:'
+  + '     <ul>'
+  + '       <li>Find Updates</li>'
+  + '       <li>Get Plugins</li>'
+  + '       <li>Report Bugs</li>'
+  + '       <li>Contribute!</li>'
+  + '     </ul>'
+  + '  </div>'
+  + '  <div>'
+  + '    MapQuest OSM tiles Courtesy of <a href="http://www.mapquest.com/" target="_blank">MapQuest</a> <img src="https://developer.mapquest.com/content/osm/mq_logo.png">'
+  + '  </div>'
+  + '  <hr>'
+  + '  <div>Version: ' + v + '</div>'
+  + '  <hr>'
+  + '  <div>' + attrib + '</div>'
+  + '  <hr>'
+  + '  <div>' + contrib + '</div>';
+  dialog({
+    title: 'IITC ' + v,
+    html: a,
+    dialogClass: 'ui-dialog-aboutIITC'
+  });
+}
+
 
 window.layerGroupLength = function(layerGroup) {
   var layersCount = 0;
@@ -39,6 +72,22 @@ window.writeCookie = function(name, val) {
   document.cookie = name + "=" + val + '; expires=Thu, 31 Dec 2020 23:59:59 GMT; path=/';
 }
 
+window.eraseCookie = function(name) {
+  document.cookie = name + '=; expires=Thu, 1 Jan 1970 00:00:00 GMT; path=/';
+}
+
+//certain values were stored in cookies, but we're better off using localStorage instead - make it easy to convert
+window.convertCookieToLocalStorage = function(name) {
+  var cookie=readCookie(name);
+  if(cookie !== undefined) {
+    console.log('converting cookie '+name+' to localStorage');
+    if(localStorage[name] === undefined) {
+      localStorage[name] = cookie;
+    }
+    eraseCookie(name);
+  }
+}
+
 // add thousand separators to given number.
 // http://stackoverflow.com/a/1990590/1684530 by Doug Neiner.
 window.digits = function(d) {
@@ -55,16 +104,14 @@ window.digits = function(d) {
 //          able arguments: http://api.jquery.com/jQuery.ajax/
 // error: see above. Additionally it is logged if the request failed.
 window.postAjax = function(action, data, success, error) {
-  data = JSON.stringify($.extend({method: 'dashboard.'+action}, data));
+  var post_data = JSON.stringify($.extend({method: 'dashboard.'+action}, data));
   var remove = function(data, textStatus, jqXHR) { window.requests.remove(jqXHR); };
   var errCnt = function(jqXHR) { window.failedRequestCount++; window.requests.remove(jqXHR); };
   var result = $.ajax({
-    // use full URL to avoid issues depending on how people set their
-    // slash. See:
-    // https://github.com/breunigs/ingress-intel-total-conversion/issues/56
-    url: window.location.protocol + '//www.ingress.com/rpc/dashboard.'+action,
+    url: '/rpc/dashboard.'+action,
     type: 'POST',
-    data: data,
+    data: post_data,
+    context: data,
     dataType: 'json',
     success: [remove, success],
     error: error ? [errCnt, error] : errCnt,
@@ -107,19 +154,23 @@ window.rangeLinkClick = function() {
 }
 
 window.showPortalPosLinks = function(lat, lng, name) {
-  var portal_name = '';
+  var encoded_name = '';
   if(name !== undefined) {
-    portal_name = encodeURIComponent(' (' + name + ')');
+    encoded_name = encodeURIComponent(' (' + name + ')');
   }
   if (typeof android !== 'undefined' && android && android.intentPosLink) {
-    android.intentPosLink(window.location.protocol + '//maps.google.com/?q='+lat+','+lng);
+    android.intentPosLink(lat, lng, encoded_name);
   } else {
     var qrcode = '<div id="qrcode"></div>';
     var script = '<script>$(\'#qrcode\').qrcode({text:\'GEO:'+lat+','+lng+'\'});</script>';
-    var gmaps = '<a href="https://maps.google.com/?q='+lat+','+lng+portal_name+'">gmaps</a>';
-    var osm = '<a href="http://www.openstreetmap.org/?mlat='+lat+'&mlon='+lng+'&zoom=16">OSM</a>';
-    var latLng = '<span>'+lat+','+lng +'</span>';
-    alert('<div style="text-align: center;">' + qrcode + script + gmaps + ' ' + osm + '<br />' + latLng + '</div>');
+    var gmaps = '<a href="https://maps.google.com/?q='+lat+','+lng+encoded_name+'">Google Maps</a>';
+    var osm = '<a href="http://www.openstreetmap.org/?mlat='+lat+'&mlon='+lng+'&zoom=16">OpenStreetMap</a>';
+    var latLng = '<span>&lt;' + lat + ',' + lng +'&gt;</span>';
+    dialog({
+      html: '<div style="text-align: center;">' + qrcode + script + gmaps + '; ' + osm + '<br />' + latLng + '</div>',
+      title: name,
+      id: 'poslinks'
+    });
   }
 }
 
@@ -177,8 +228,8 @@ window.renderLimitReached = function(ratio) {
 
 window.getMinPortalLevel = function() {
   var z = map.getZoom();
-  if(z >= 16) return 0;
-  var conv = ['impossible', 8,7,7,6,6,5,5,4,4,3,3,2,2,1,1];
+  if(z >= 17) return 0;
+  var conv = ['impossible', 8,8,8,7,7,6,6,5,4,4,3,3,2,2,1,1];
   var minLevelByRenderLimit = portalRenderLimit.getMinLevel();
   var result = minLevelByRenderLimit > conv[z]
     ? minLevelByRenderLimit
@@ -208,6 +259,7 @@ window.getTypeByGuid = function(guid) {
   // portals end in “.11” or “.12“, links in “.9", fields in “.b”
   // .11 == portals
   // .12 == portals
+  // .16 == portals
   // .9  == links
   // .b  == fields
   // .c  == player/creator
@@ -221,6 +273,7 @@ window.getTypeByGuid = function(guid) {
   switch(guid.slice(33)) {
     case '11':
     case '12':
+    case '16':
       return TYPE_PORTAL;
 
     case '9':
@@ -252,16 +305,22 @@ if (typeof String.prototype.startsWith !== 'function') {
   };
 }
 
+// escape a javascript string, so quotes and backslashes are escaped with a backslash
+// (for strings passed as parameters to html onclick="..." for example)
+window.escapeJavascriptString = function(str) {
+  return (str+'').replace(/[\\"']/g,'\\$&');
+}
+
 window.prettyEnergy = function(nrg) {
   return nrg> 1000 ? Math.round(nrg/1000) + ' k': nrg;
 }
 
 window.setPermaLink = function(elm) {
   var c = map.getCenter();
-  var lat = Math.round(c.lat*1E6);
-  var lng = Math.round(c.lng*1E6);
-  var qry = 'latE6='+lat+'&lngE6='+lng+'&z=' + (map.getZoom()-1);
-  $(elm).attr('href',  'https://www.ingress.com/intel?' + qry);
+  var lat = Math.round(c.lat*1E6)/1E6;
+  var lng = Math.round(c.lng*1E6)/1E6;
+  var qry = 'll='+lat+','+lng+'&z=' + map.getZoom();
+  $(elm).attr('href',  '/intel?' + qry);
 }
 
 window.uniqueArray = function(arr) {
@@ -319,4 +378,32 @@ window.convertTextToTableMagic = function(text) {
 // Given 3 sets of points in an array[3]{lat, lng} returns the area of the triangle
 window.calcTriArea = function(p) {
   return Math.abs((p[0].lat*(p[1].lng-p[2].lng)+p[1].lat*(p[2].lng-p[0].lng)+p[2].lat*(p[0].lng-p[1].lng))/2);
+}
+
+// Update layerGroups display status to window.overlayStatus and localStorage 'ingress.intelmap.layergroupdisplayed'
+window.updateDisplayedLayerGroup = function(name, display) {
+  overlayStatus[name] = display;
+  localStorage['ingress.intelmap.layergroupdisplayed'] = JSON.stringify(overlayStatus);
+}
+
+// Read layerGroup status from window.overlayStatus if it was added to map,
+// read from cookie if it has not added to map yet.
+// return 'defaultDisplay' if both overlayStatus and cookie didn't have the record
+window.isLayerGroupDisplayed = function(name, defaultDisplay) {
+  if(typeof(overlayStatus[name]) !== 'undefined') return overlayStatus[name];
+
+  convertCookieToLocalStorage('ingress.intelmap.layergroupdisplayed');
+  var layersJSON = localStorage['ingress.intelmap.layergroupdisplayed'];
+  if(!layersJSON) return defaultDisplay;
+
+  var layers = JSON.parse(layersJSON);
+  // keep latest overlayStatus
+  overlayStatus = $.extend(layers, overlayStatus);
+  if(typeof(overlayStatus[name]) === 'undefined') return defaultDisplay;
+  return overlayStatus[name];
+}
+
+window.addLayerGroup = function(name, layerGroup, defaultDisplay) {
+  if(isLayerGroupDisplayed(name, defaultDisplay)) map.addLayer(layerGroup);
+  layerChooser.addOverlay(layerGroup, name);
 }

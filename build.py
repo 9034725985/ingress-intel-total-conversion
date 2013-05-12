@@ -8,7 +8,14 @@ import base64
 import sys
 import os
 import shutil
+import json
+import shelve
+import hashlib
 
+try:
+  import urllib2
+except ImportError:
+  import urllib.request as urllib2
 
 # load settings file
 from buildsettings import buildSettings
@@ -66,6 +73,33 @@ def loaderRaw(var):
     fn = var.group(1)
     return readfile(fn)
 
+def loaderMD(var):
+    fn = var.group(1)
+    # use different MD.dat's for python 2 vs 3 incase user switches versions, as they are not compatible
+    db = shelve.open('build/MDv' + str(sys.version_info.major) + '.dat')
+    if 'files' in db:
+      files = db['files']
+    else:
+      files = {}
+    file = readfile(fn)
+    filemd5 = hashlib.md5(file.encode('utf8')).hexdigest()
+    # check if file has already been parsed by the github api
+    if fn in files and filemd5 in files[fn]:
+      # use the stored copy if nothing has changed to avoid hiting the api more then the 60/hour when not signed in
+      db.close()
+      return files[fn][filemd5]
+    else:
+      url = 'https://api.github.com/markdown'
+      payload = {'text': file, 'mode': 'markdown'}
+      headers = {'Content-Type': 'application/json'}
+      req = urllib2.Request(url, json.dumps(payload).encode('utf8'), headers)
+      md = urllib2.urlopen(req).read().decode('utf8').replace('\n', '\\n').replace('\'', '\\\'')
+      files[fn] = {}
+      files[fn][filemd5] = md
+      db['files'] = files
+      db.close()
+      return md
+
 def loaderImage(var):
     fn = var.group(1)
     return 'data:image/png;base64,{0}'.format(base64.encodestring(open(fn, 'rb').read()).decode('utf8').replace('\n', ''))
@@ -86,6 +120,7 @@ def doReplacements(script,updateUrl,downloadUrl):
 
     script = re.sub('@@INCLUDERAW:([0-9a-zA-Z_./-]+)@@', loaderRaw, script)
     script = re.sub('@@INCLUDESTRING:([0-9a-zA-Z_./-]+)@@', loaderString, script)
+    script = re.sub('@@INCLUDEMD:([0-9a-zA-Z_./-]+)@@', loaderMD, script)
     script = re.sub('@@INCLUDEIMAGE:([0-9a-zA-Z_./-]+)@@', loaderImage, script)
 
     script = script.replace('@@BUILDDATE@@', buildDate)
@@ -133,6 +168,11 @@ else:
     os.makedirs(outDir)
 
 
+# run any preBuild commands
+for cmd in settings.get('preBuild',[]):
+    os.system ( cmd )
+
+
 # load main.js, parse, and create main total-conversion-build.user.js
 main = readfile('main.js')
 
@@ -156,29 +196,51 @@ for fn in glob.glob("plugins/*.user.js"):
     metafn = fn.replace('.user.js', '.meta.js')
     saveScriptAndMeta(script, os.path.join(outDir,fn), os.path.join(outDir,metafn))
 
-
 # if we're building mobile too
 if buildMobile:
-    if buildMobile not in ['debug','release']:
-        raise Exception("Error: buildMobile must be 'debug' or 'release'")
+    if buildMobile not in ['debug','release','copyonly']:
+        raise Exception("Error: buildMobile must be 'debug' or 'release' or 'copyonly'")
 
-    # first, copy the IITC script into the mobile folder. create the folder if needed
+    # compile the user location script
+    fn = "user-location.user.js"
+    script = readfile("mobile/" + fn)
+    downloadUrl = distUrlBase and distUrlBase + '/' + fn.replace("\\","/") or 'none'
+    updateUrl = distUrlBase and downloadUrl.replace('.user.js', '.meta.js') or 'none'
+    script = doReplacements(script, downloadUrl=downloadUrl, updateUrl=updateUrl)
+
+    metafn = fn.replace('.user.js', '.meta.js')
+    saveScriptAndMeta(script, os.path.join(outDir,fn), os.path.join(outDir,metafn))
+
+    # copy the IITC script into the mobile folder. create the folder if needed
     try:
         os.makedirs("mobile/assets")
     except:
         pass
-    shutil.copy(os.path.join(outDir,"total-conversion-build.user.js"), "mobile/assets/iitc.js")
+    shutil.copy(os.path.join(outDir,"total-conversion-build.user.js"), "mobile/assets/total-conversion-build.user.js")
+    # copy the user location script into the mobile folder.
+    shutil.copy(os.path.join(outDir,"user-location.user.js"), "mobile/assets/user-location.user.js")
+    # also copy plugins
+    try:
+        os.makedirs("mobile/assets/plugins")
+    except:
+        pass
+    shutil.rmtree("mobile/assets/plugins")
+    shutil.copytree(os.path.join(outDir,"plugins"), "mobile/assets/plugins", ignore=shutil.ignore_patterns('*.meta.js', 'force-https*', 'privacy-view*'))
 
-    # TODO? also copy plugins - once the mobile app supports plugins, that is
+
+    if buildMobile != 'copyonly':
+        # now launch 'ant' to build the mobile project
+        retcode = os.system("ant -buildfile mobile/build.xml %s" % buildMobile)
+
+        if retcode != 0:
+            print ("Error: mobile app failed to build. ant returned %d" % retcode)
+        else:
+            shutil.copy("mobile/bin/IITC_Mobile-%s.apk" % buildMobile, os.path.join(outDir,"IITC_Mobile-%s.apk" % buildMobile) )
 
 
-    # now launch 'ant' to build the mobile project
-    retcode = os.system("ant -buildfile mobile/build.xml %s" % buildMobile)
-
-    if retcode != 0:
-        print ("Error: mobile app failed to build. ant returned %d" % retcode)
-    else:
-        shutil.copy("mobile/bin/IITC_Mobile-%s.apk" % buildMobile, os.path.join(outDir,"IITC_Mobile-%s.apk" % buildMobile) )
+# run any postBuild commands
+for cmd in settings.get('postBuild',[]):
+    os.system ( cmd )
 
 
 # vim: ai si ts=4 sw=4 sts=4 et

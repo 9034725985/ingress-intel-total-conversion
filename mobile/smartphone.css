@@ -7,21 +7,28 @@ body {
   background: #0B3351 !important
 }
 
+.leaflet-top .leaflet-control {
+  margin-top: 5px !important;
+  margin-left: 5px !important;
+}
 
 .leaflet-control-layers {
   margin-left: 0 !important;
-  margin-top: 40px !important;
+  margin-top: 0 !important;
 }
 
-.leaflet-control-zoom {
-  margin-left: 5px !important;
-  margin-top: 80px !important;
+#geosearch {
+  width: 100%;
 }
 
+#geosearchwrapper img {
+  display: none;
+}
 
 #chatcontrols {
   height: 38px;
   width: 100%;
+  display: none !important;
 }
 
 /* hide shrink button */
@@ -44,7 +51,7 @@ body {
 #chat {
   left:0;
   right:0;
-  top:37px !important;
+  top: 1px !important;
   bottom:30px;
   width: auto;
 }
@@ -58,15 +65,21 @@ body {
   width: 77px;
 }
 
+#chatcontrols a.active {
+  border-color: #FFCE00;
+  border-bottom-width:0px;
+  font-weight:bold
+}
 
-
+#chatcontrols a.active + a {
+  border-left-color: #FFCE00
+}
 
 #sidebartoggle {
   display: none !important;
 }
 
 #scrollwrapper {
-  top: 36px;
   bottom: 0;
   max-height: none !important;
   width: 100% !important;
@@ -96,10 +109,12 @@ body {
   width: 100%;
 }
 
+/* base layer selection - first column */
 .leaflet-control-layers-base {
   float: left;
 }
 
+/* overlays layer selection - 2nd column */
 .leaflet-control-layers-overlays {
   float: left;
   margin-left: 8px;
@@ -107,14 +122,23 @@ body {
   padding-left: 8px;
 }
 
+/* hide the usual seperator */
 .leaflet-control-layers-separator {
   display: none;
 }
 
+/* increase padding on list items - easier for touchscreens */
+/* removed for now. could consider adding it back, conditional on device screen size?
 .leaflet-control-layers-list label {
   padding: 6px 0;
 }
+*/
 
 .leaflet-control-attribution {
 
+}
+
+#portal_highlight_select{
+  top:0px !important;
+  left:0px !important;
 }

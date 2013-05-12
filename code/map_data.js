@@ -12,34 +12,30 @@ window.requestData = function() {
   requests.abort();
   cleanUp();
 
-  var magic = convertCenterLat(map.getCenter().lat);
-  var R = calculateR(magic);
-
   var bounds = map.getBounds();
-  // convert to point values
-  topRight = convertLatLngToPoint(bounds.getNorthEast(), magic, R);
-  bottomLeft = convertLatLngToPoint(bounds.getSouthWest() , magic, R);
-  // how many quadrants intersect the current view?
-  quadsX = Math.abs(bottomLeft.x - topRight.x);
-  quadsY = Math.abs(bottomLeft.y - topRight.y);
+
+  var x1 = lngToTile(bounds.getNorthWest().lng, map.getZoom());
+  var x2 = lngToTile(bounds.getNorthEast().lng, map.getZoom());
+  var y1 = latToTile(bounds.getNorthWest().lat, map.getZoom());
+  var y2 = latToTile(bounds.getSouthWest().lat, map.getZoom());
 
   // will group requests by second-last quad-key quadrant
   tiles = {};
 
   // walk in x-direction, starts right goes left
-  for(var i = 0; i <= quadsX; i++) {
-    var x = Math.abs(topRight.x - i);
-    var qk = pointToQuadKey(x, topRight.y);
-    var bnds = convertPointToLatLng(x, topRight.y, magic, R);
-    if(!tiles[qk.slice(0, -1)]) tiles[qk.slice(0, -1)] = [];
-    tiles[qk.slice(0, -1)].push(generateBoundsParams(qk, bnds));
-
-    // walk in y-direction, starts top, goes down
-    for(var j = 1; j <= quadsY; j++) {
-      var qk = pointToQuadKey(x, topRight.y + j);
-      var bnds = convertPointToLatLng(x, topRight.y + j, magic, R);
-      if(!tiles[qk.slice(0, -1)]) tiles[qk.slice(0, -1)] = [];
-      tiles[qk.slice(0, -1)].push(generateBoundsParams(qk, bnds));
+  for (var x = x1; x <= x2; x++) {
+    for (var y = y1; y <= y2; y++) {
+      var tile_id = pointToTileId(map.getZoom(), x, y);
+      var bucket = Math.floor(x / 2) + "" + Math.floor(y / 2);
+      if (!tiles[bucket])
+        tiles[bucket] = [];
+      tiles[bucket].push(generateBoundsParams(
+        tile_id,
+        tileToLat(y + 1, map.getZoom()),
+        tileToLng(x, map.getZoom()),
+        tileToLat(y, map.getZoom()),
+        tileToLng(x + 1, map.getZoom())
+      ));
     }
   }
 
@@ -47,7 +43,7 @@ window.requestData = function() {
   portalRenderLimit.init();
   // finally send ajax requests
   $.each(tiles, function(ind, tls) {
-    data = { minLevelOfDetail: -1 };
+    data = { zoom: map.getZoom() };
     data.boundsParamsList = tls;
     window.requests.add(window.postAjax('getThinnedEntitiesV2', data, window.handleDataResponse, window.handleFailedRequest));
   });
@@ -78,7 +74,7 @@ window.handleDataResponse = function(data, textStatus, jqXHR) {
   // portals can be brought to front, this costs extra time. They need
   // to be in the foreground, or they cannot be clicked. See
   // https://github.com/Leaflet/Leaflet/issues/185
-  var ppp = [];
+  var ppp = {};
   var p2f = {};
   $.each(m, function(qk, val) {
     $.each(val.deletedGameEntityGuids || [], function(ind, guid) {
@@ -103,11 +99,20 @@ window.handleDataResponse = function(data, textStatus, jqXHR) {
         if(!window.getPaddedBounds().contains(latlng)
               && selectedPortal !== ent[0]
               && urlPortal !== ent[0]
+              && !(urlPortalLL && urlPortalLL[0] === latlng[0] && urlPortalLL[1] === latlng[1])
           ) return;
 
+        if('imageByUrl' in ent[2] && 'imageUrl' in ent[2].imageByUrl) {
+          if(window.location.protocol === 'https:') {
+            ent[2].imageByUrl.imageUrl = ent[2].imageByUrl.imageUrl.indexOf('www.panoramio.com') !== -1
+                                       ? ent[2].imageByUrl.imageUrl.replace(/^http:\/\/www/, 'https://ssl').replace('small', 'medium')
+                                       : ent[2].imageByUrl.imageUrl.replace(/^http:\/\//, '//');
+          }
+        } else {
+          ent[2].imageByUrl = {'imageUrl': DEFAULT_PORTAL_IMG};
+        }
 
-
-        ppp.push(ent); // delay portal render
+        ppp[ent[0]] = ent; // delay portal render
       } else if(ent[2].edge !== undefined) {
         renderLink(ent);
       } else if(ent[2].capturedRegion !== undefined) {
@@ -124,6 +129,25 @@ window.handleDataResponse = function(data, textStatus, jqXHR) {
   });
 
   $.each(ppp, function(ind, portal) {
+    if ('portalV2' in portal[2] && 'linkedEdges' in portal[2].portalV2) {
+      $.each(portal[2].portalV2.linkedEdges, function (ind, edge) {
+        if (!ppp[edge.otherPortalGuid])
+          return;
+        renderLink([
+          edge.edgeGuid,
+          portal[1],
+          {
+            "controllingTeam": portal[2].controllingTeam,
+            "edge": {
+              "destinationPortalGuid": edge.isOrigin ? ppp[edge.otherPortalGuid][0] : portal[0],
+              "destinationPortalLocation": edge.isOrigin ? ppp[edge.otherPortalGuid][2].locationE6 : portal[2].locationE6,
+              "originPortalGuid": !edge.isOrigin ? ppp[edge.otherPortalGuid][0] : portal[0],
+              "originPortalLocation": !edge.isOrigin ? ppp[edge.otherPortalGuid][2].locationE6 : portal[2].locationE6
+            }
+          }
+        ]);
+      });
+    }
     if(portal[2].portalV2['linkedFields'] === undefined) {
       portal[2].portalV2['linkedFields'] = [];
     }
@@ -149,11 +173,17 @@ window.handlePortalsRender = function(portals) {
   // Preserve selectedPortal because it will get lost on re-rendering
   // the portal
   var oldSelectedPortal = selectedPortal;
-
   runHooks('portalDataLoaded', {portals : portals});
   $.each(portals, function(ind, portal) {
     //~ if(selectedPortal === portal[0]) portalUpdateAvailable = true;
-    if(urlPortal && portal[0] === urlPortal) portalInUrlAvailable = true;
+    if(urlPortalLL && urlPortalLL[0] === portal[2].locationE6.latE6/1E6 && urlPortalLL[1] === portal[2].locationE6.lngE6/1E6) {
+      urlPortal = portal[0];
+      portalInUrlAvailable = true;
+      urlPortalLL = null;
+    }
+    if(window.portals[portal[0]]) {
+      highlightPortal(window.portals[portal[0]]);
+    }
     renderPortal(portal);
   });
 
@@ -256,7 +286,7 @@ window.renderPortal = function(ent) {
   // do nothing if portal did not change
   var layerGroup = portalsLayers[parseInt(portalLevel)];
   var old = findEntityInLeaflet(layerGroup, window.portals, ent[0]);
-  if(old) {
+  if(!changing_highlighters && old) {
     var oo = old.options;
 
     // Default checks to see if a portal needs to be re-rendered
@@ -264,7 +294,7 @@ window.renderPortal = function(ent) {
     u = u || oo.level !== portalLevel;
 
     // Allow plugins to add additional conditions as to when a portal gets re-rendered
-    var hookData = {portal: ent[2], oldPortal: oo.details, reRender: false};
+    var hookData = {portal: ent[2], oldPortal: oo.details, portalGuid: ent[0], reRender: false};
     runHooks('beforePortalReRender', hookData);
     u = u || hookData.reRender;
 
@@ -304,6 +334,7 @@ window.renderPortal = function(ent) {
     clickable: true,
     level: portalLevel,
     team: team,
+    ent: ent,
     details: ent[2],
     guid: ent[0]});
 
@@ -341,7 +372,7 @@ window.renderPortal = function(ent) {
   });
 
   window.renderResonators(ent, null);
-
+  highlightPortal(p);
   window.runHooks('portalAdded', {portal: p});
   p.addTo(layerGroup);
 }

@@ -1,7 +1,7 @@
 // ==UserScript==
 // @id             iitc-plugin-show-portal-weakness@vita10gy
 // @name           IITC plugin: show portal weakness
-// @version        0.6.2.@@DATETIMEVERSION@@
+// @version        0.7.0.@@DATETIMEVERSION@@
 // @namespace      https://github.com/jonatkins/ingress-intel-total-conversion
 // @updateURL      @@UPDATEURL@@
 // @downloadURL    @@DOWNLOADURL@@
@@ -22,8 +22,7 @@ if(typeof window.plugin !== 'function') window.plugin = function() {};
 // use own namespace for plugin
 window.plugin.portalWeakness = function() {};
 
-window.plugin.portalWeakness.portalAdded = function(data) {
-
+window.plugin.portalWeakness.highlightWeakness = function(data) {
   var d = data.portal.options.details;
   var portal_weakness = 0;
   if(getTeam(d) !== 0) {
@@ -82,20 +81,11 @@ window.plugin.portalWeakness.portalAdded = function(data) {
                             dashArray: null});
     }
   }
-}
-
-window.plugin.portalWeakness.portalDataLoaded = function(data) {
-  $.each(data.portals, function(ind, portal) {
-    if(window.portals[portal[0]]) {
-      window.plugin.portalWeakness.portalAdded({portal: window.portals[portal[0]]});
-    }
-  });
+  window.COLOR_SELECTED_PORTAL = '#f0f';
 }
 
 var setup =  function() {
-  window.addHook('portalAdded', window.plugin.portalWeakness.portalAdded);
-  window.addHook('portalDataLoaded', window.plugin.portalWeakness.portalDataLoaded);
-  window.COLOR_SELECTED_PORTAL = '#f0f';
+  window.addPortalHighlighter('Portal Weakness', window.plugin.portalWeakness.highlightWeakness);
 }
 
 // PLUGIN END //////////////////////////////////////////////////////////
