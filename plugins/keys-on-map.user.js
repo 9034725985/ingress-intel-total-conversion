@@ -1,21 +1,20 @@
 // ==UserScript==
 // @id             iitc-plugin-keys-on-map@xelio
 // @name           IITC plugin: Keys on map
-// @version        0.2.0.@@DATETIMEVERSION@@
+// @category       Keys
+// @version        0.2.1.@@DATETIMEVERSION@@
 // @namespace      https://github.com/jonatkins/ingress-intel-total-conversion
 // @updateURL      @@UPDATEURL@@
 // @downloadURL    @@DOWNLOADURL@@
-// @description    [@@BUILDNAME@@-@@BUILDDATE@@] Show keys in keys plugin on map.
+// @description    [@@BUILDNAME@@-@@BUILDDATE@@] Show the manually entered key counts from the 'keys' plugin on the map.
 // @include        https://www.ingress.com/intel*
 // @include        http://www.ingress.com/intel*
 // @match          https://www.ingress.com/intel*
 // @match          http://www.ingress.com/intel*
+// @grant          none
 // ==/UserScript==
 
-function wrapper() {
-// ensure plugin framework is there, even if iitc is not yet loaded
-if(typeof window.plugin !== 'function') window.plugin = function() {};
-
+@@PLUGINSTART@@
 
 // PLUGIN START ////////////////////////////////////////////////////////
 
@@ -53,6 +52,13 @@ window.plugin.keysOnMap.keyUpdate = function(data) {
   var latLng = portal.getLatLng();
 
   plugin.keysOnMap.renderKey(data.guid, latLng)
+}
+
+window.plugin.keysOnMap.refreshAllKeys = function() {
+  plugin.keysOnMap.keyLayerGroup.clearLayers();
+  $.each(plugin.keys.keys, function(key, count) {
+    plugin.keysOnMap.keyUpdate({guid: key});
+  });
 }
 
 window.plugin.keysOnMap.renderKey = function(guid,latLng) {
@@ -117,23 +123,14 @@ var setup =  function() {
   // Avoid error if this plugin load first
   if($.inArray('pluginKeysUpdateKey', window.VALID_HOOKS) < 0)
     window.VALID_HOOKS.push('pluginKeysUpdateKey');
+  if($.inArray('pluginKeysRefreshAll', window.VALID_HOOKS) < 0)
+    window.VALID_HOOKS.push('pluginKeysRefreshAll');
 
   window.addHook('portalAdded', window.plugin.keysOnMap.portalAdded);
   window.addHook('pluginKeysUpdateKey', window.plugin.keysOnMap.keyUpdate);
+  window.addHook('pluginKeysRefreshAll', window.plugin.keysOnMap.refreshAllKeys);
 }
 
 // PLUGIN END //////////////////////////////////////////////////////////
 
-if(window.iitcLoaded && typeof setup === 'function') {
-  setup();
-} else {
-  if(window.bootPlugins)
-    window.bootPlugins.push(setup);
-  else
-    window.bootPlugins = [setup];
-}
-} // wrapper end
-// inject code into site context
-var script = document.createElement('script');
-script.appendChild(document.createTextNode('('+ wrapper +')();'));
-(document.body || document.head || document.documentElement).appendChild(script);
+@@PLUGINEND@@

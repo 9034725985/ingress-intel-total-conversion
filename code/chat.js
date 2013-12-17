@@ -41,16 +41,22 @@ window.chat._oldBBox = null;
 window.chat.genPostData = function(isFaction, storageHash, getOlderMsgs) {
   if(typeof isFaction !== 'boolean') throw('Need to know if public or faction chat.');
 
+  // get window bounds, and extend to the minimum chat radius
   chat._localRangeCircle.setLatLng(map.getCenter());
   var b = map.getBounds().extend(chat._localRangeCircle.getBounds());
-  var ne = b.getNorthEast();
-  var sw = b.getSouthWest();
 
-  // round bounds in order to ignore rounding errors
-  var bbs = $.map([ne.lat, ne.lng, sw.lat, sw.lng], function(x) { return Math.round(x*1E4) }).join();
-  if(chat._oldBBox && chat._oldBBox !== bbs) {
+  // set a current bounding box if none set so far
+  if (!chat._oldBBox) chat._oldBBox = b;
+
+  // to avoid unnecessary chat refreshes, a small difference compared to the previous bounding box
+  // is not considered different
+  var CHAT_BOUNDINGBOX_SAME_FACTOR = 0.1;
+  // if the old and new box contain each other, after expanding by the factor, don't reset chat
+  if (!(b.pad(CHAT_BOUNDINGBOX_SAME_FACTOR).contains(chat._oldBBox) && chat._oldBBox.pad(CHAT_BOUNDINGBOX_SAME_FACTOR).contains(b))) {
+    console.log('Bounding Box changed, chat will be cleared (old: '+chat._oldBBox.toBBoxString()+'; new: '+b.toBBoxString()+')');
+
     $('#chat > div').data('needsClearing', true);
-    console.log('Bounding Box changed, chat will be cleared (old: '+chat._oldBBox+' ; new: '+bbs+' )');
+
     // need to reset these flags now because clearing will only occur
     // after the request is finished – i.e. there would be one almost
     // useless request.
@@ -61,8 +67,9 @@ window.chat.genPostData = function(isFaction, storageHash, getOlderMsgs) {
     chat._public.data = {};
     chat._public.oldestTimestamp = -1;
     chat._public.newestTimestamp = -1;
+
+    chat._oldBBox = b;
   }
-  chat._oldBBox = bbs;
 
   var ne = b.getNorthEast();
   var sw = b.getSouthWest();
@@ -74,7 +81,7 @@ window.chat.genPostData = function(isFaction, storageHash, getOlderMsgs) {
     maxLngE6: Math.round(ne.lng*1E6),
     minTimestampMs: -1,
     maxTimestampMs: -1,
-    factionOnly: isFaction
+    chatTab: isFaction ? 'faction' : 'all'
   }
 
   if(getOlderMsgs) {
@@ -83,7 +90,7 @@ window.chat.genPostData = function(isFaction, storageHash, getOlderMsgs) {
   } else {
     // ask for newer chat
     var min = storageHash.newestTimestamp;
-    // the inital request will have both timestamp values set to -1,
+    // the initial request will have both timestamp values set to -1,
     // thus we receive the newest desiredNumItems. After that, we will
     // only receive messages with a timestamp greater or equal to min
     // above.
@@ -99,6 +106,9 @@ window.chat.genPostData = function(isFaction, storageHash, getOlderMsgs) {
     // Currently this edge case is not handled. Let’s see if this is a
     // problem in crowded areas.
     $.extend(data, {minTimestampMs: min});
+    // when requesting with an actual minimum timestamp, request oldest rather than newest first.
+    // this matches the stock intel site, and ensures no gaps when continuing after an extended idle period
+    if (min > -1) $.extend(data, {ascendingTimestampOrder: true});
   }
   return data;
 }
@@ -117,9 +127,9 @@ window.chat.requestFaction = function(getOlderMsgs, isRetry) {
 
   var d = chat.genPostData(true, chat._faction, getOlderMsgs);
   var r = window.postAjax(
-    'getPaginatedPlextsV2',
+    'getPaginatedPlexts',
     d,
-    chat.handleFaction,
+    function(data, textStatus, jqXHR) { chat.handleFaction(data, getOlderMsgs); },
     isRetry
       ? function() { window.chat._requestFactionRunning = false; }
       : function() { window.chat.requestFaction(getOlderMsgs, true) }
@@ -130,7 +140,7 @@ window.chat.requestFaction = function(getOlderMsgs, isRetry) {
 
 
 window.chat._faction = {data:{}, oldestTimestamp:-1, newestTimestamp:-1};
-window.chat.handleFaction = function(data, textStatus, jqXHR) {
+window.chat.handleFaction = function(data, olderMsgs) {
   chat._requestFactionRunning = false;
 
   if(!data || !data.result) {
@@ -141,7 +151,7 @@ window.chat.handleFaction = function(data, textStatus, jqXHR) {
   if(data.result.length === 0) return;
 
   var old = chat._faction.oldestTimestamp;
-  chat.writeDataToHash(data, chat._faction, false);
+  chat.writeDataToHash(data, chat._faction, false, olderMsgs);
   var oldMsgsWereAdded = old !== chat._faction.oldestTimestamp;
 
   runHooks('factionChatDataAvailable', {raw: data, processed: chat._faction.data});
@@ -168,9 +178,9 @@ window.chat.requestPublic = function(getOlderMsgs, isRetry) {
 
   var d = chat.genPostData(false, chat._public, getOlderMsgs);
   var r = window.postAjax(
-    'getPaginatedPlextsV2',
+    'getPaginatedPlexts',
     d,
-    chat.handlePublic,
+    function(data, textStatus, jqXHR) { chat.handlePublic(data, getOlderMsgs); },
     isRetry
       ? function() { window.chat._requestPublicRunning = false; }
       : function() { window.chat.requestPublic(getOlderMsgs, true) }
@@ -180,7 +190,7 @@ window.chat.requestPublic = function(getOlderMsgs, isRetry) {
 }
 
 window.chat._public = {data:{}, oldestTimestamp:-1, newestTimestamp:-1};
-window.chat.handlePublic = function(data, textStatus, jqXHR) {
+window.chat.handlePublic = function(data, olderMsgs) {
   chat._requestPublicRunning = false;
 
   if(!data || !data.result) {
@@ -191,7 +201,7 @@ window.chat.handlePublic = function(data, textStatus, jqXHR) {
   if(data.result.length === 0) return;
 
   var old = chat._public.oldestTimestamp;
-  chat.writeDataToHash(data, chat._public, true);
+  chat.writeDataToHash(data, chat._public, true, olderMsgs);
   var oldMsgsWereAdded = old !== chat._public.oldestTimestamp;
 
   runHooks('publicChatDataAvailable', {raw: data, processed: chat._public.data});
@@ -218,12 +228,12 @@ window.chat.renderCompact = function(oldMsgsWereAdded) {
   $.each(chat._public.data, function(guid, entry) {
     // skip player msgs
     if(!entry[1]) return true;
-    var pguid = entry[3];
+    var nick = entry[3];
     // ignore if player has newer data
-    if(data[pguid] && data[pguid][0] > entry[0]) return true;
-    data[pguid] = entry;
+    if(data[nick] && data[nick][0] > entry[0]) return true;
+    data[nick] = entry;
   });
-  // data keys are now player guids instead of message guids. However,
+  // data keys are now player nicks instead of message guids. However,
   // it is all the same to renderData.
   chat.renderData(data, 'chatcompact', oldMsgsWereAdded);
 }
@@ -249,7 +259,7 @@ window.chat.nicknameClicked = function(event, nickname) {
   }
 }
 
-window.chat.writeDataToHash = function(newData, storageHash, isPublicChannel) {
+window.chat.writeDataToHash = function(newData, storageHash, isPublicChannel, isOlderMsgs) {
   $.each(newData.result, function(ind, json) {
     // avoid duplicates
     if(json[0] in storageHash.data) return true;
@@ -258,7 +268,7 @@ window.chat.writeDataToHash = function(newData, storageHash, isPublicChannel) {
     var msgToPlayer = false;
 
     var time = json[1];
-    var team = json[2].plext.team === 'ALIENS' ? TEAM_ENL : TEAM_RES;
+    var team = json[2].plext.team === 'RESISTANCE' ? TEAM_RES : TEAM_ENL;
     var auto = json[2].plext.plextType !== 'PLAYER_GENERATED';
     var systemNarrowcast = json[2].plext.plextType === 'SYSTEM_NARROWCAST';
 
@@ -274,13 +284,11 @@ window.chat.writeDataToHash = function(newData, storageHash, isPublicChannel) {
       switch(markup[0]) {
       case 'SENDER': // user generated messages
         nick = markup[1].plain.slice(0, -2); // cut “: ” at end
-        pguid = markup[1].guid;
         break;
 
       case 'PLAYER': // automatically generated messages
-        pguid = markup[1].guid;
         nick = markup[1].plain;
-        team = markup[1].team === 'ALIENS' ? TEAM_ENL : TEAM_RES;
+        team = markup[1].team === 'RESISTANCE' ? TEAM_RES : TEAM_ENL;
         if(ind > 0) msg += nick; // don’t repeat nick directly
         break;
 
@@ -341,10 +349,9 @@ window.chat.writeDataToHash = function(newData, storageHash, isPublicChannel) {
     if ((!isPublicChannel) && (!isSecureMessage)) msg = '<span style="color: #ff6">[public]</span> ' + msg;
 
 
-    // format: timestamp, autogenerated, HTML message, player guid
-    storageHash.data[json[0]] = [json[1], auto, chat.renderMsg(msg, nick, time, team, msgToPlayer, systemNarrowcast), pguid];
+    // format: timestamp, autogenerated, HTML message
+    storageHash.data[json[0]] = [json[1], auto, chat.renderMsg(msg, nick, time, team, msgToPlayer, systemNarrowcast), nick];
 
-    window.setPlayerName(pguid, nick); // free nick name resolves
   });
 }
 
@@ -394,7 +401,10 @@ window.chat.renderDivider = function(text) {
 
 window.chat.renderMsg = function(msg, nick, time, team, msgToPlayer, systemNarrowcast) {
   var ta = unixTimeToHHmm(time);
-  var tb = unixTimeToString(time, true);
+  var tb = unixTimeToDateTimeString(time, true);
+  //add <small> tags around the milliseconds
+  tb = (tb.slice(0,19)+'<small class="milliseconds">'+tb.slice(19)+'</small>').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
   // help cursor via “#chat time”
   var t = '<time title="'+tb+'" data-timestamp="'+time+'">'+ta+'</time>';
   if ( msgToPlayer )
@@ -476,6 +486,8 @@ window.chat.needMoreMessages = function() {
 window.chat.chooseAnchor = function(t) {
   var tt = t.text();
 
+  localStorage['iitc-chat-tab'] = tt;
+
   var mark = $('#chatinput mark');
   var input = $('#chatinput input');
 
@@ -521,11 +533,10 @@ window.chat.chooseAnchor = function(t) {
 }
 
 window.chat.show = function(name) {
-        window.isSmartphone
-                ? $('#updatestatus').hide()
-                : $('#updatestatus').show();
+    window.isSmartphone()
+        ? $('#updatestatus').hide()
+        : $('#updatestatus').show();
     $('#chat, #chatinput').show();
-    $('#map').css('visibility', 'hidden');
 
     var t = $('<a>'+name+'</a>');
     window.chat.chooseAnchor(t);
@@ -565,6 +576,11 @@ window.chat.keepScrollPosition = function(box, scrollBefore, isOldMsgs) {
 window.chat.setup = function() {
   window.chat._localRangeCircle =  L.circle(map.getCenter(), CHAT_MIN_RANGE*1000);
 
+  if (localStorage['iitc-chat-tab']) {
+    var t = $('<a>'+localStorage['iitc-chat-tab']+'</a>');
+    window.chat.chooseAnchor(t);
+  }
+
   $('#chatcontrols, #chat, #chatinput').show();
 
   $('#chatcontrols a:first').click(window.chat.toggle);
@@ -595,14 +611,12 @@ window.chat.setup = function() {
     if(scrollBottom(t) === 0) chat.requestPublic(false);
   });
 
-  chat.request();
-  window.addResumeFunction(chat.request);
   window.requests.addRefreshFunction(chat.request);
 
-  var cls = PLAYER.team === 'ALIENS' ? 'enl' : 'res';
+  var cls = PLAYER.team === 'RESISTANCE' ? 'res' : 'enl';
   $('#chatinput mark').addClass(cls);
 
-  $(window).on('click', '.nickname', function(event) {
+  $(document).on('click', '.nickname', function(event) {
     window.chat.nicknameClicked(event, $(this).text());
   });
 }
@@ -663,7 +677,18 @@ window.chat.postMsg = function() {
   var msg = $.trim($('#chatinput input').val());
   if(!msg || msg === '') return;
 
-  if(c === 'debug') return new Function (msg)();
+  if(c === 'debug') {
+    var result;
+    try {
+      result = eval(msg);
+    } catch(e) {
+      if(e.stack) console.error(e.stack);
+      throw e; // to trigger native error message
+    }
+    if(result !== undefined)
+      console.log(result.toString());
+    return result;
+  }
 
   var publik = c === 'public';
   var latlng = map.getCenter();
@@ -671,7 +696,7 @@ window.chat.postMsg = function() {
   var data = {message: msg,
               latE6: Math.round(latlng.lat*1E6),
               lngE6: Math.round(latlng.lng*1E6),
-              factionOnly: !publik};
+              chatTab: publik ? 'all' : 'faction'};
 
   var errMsg = 'Your message could not be delivered. You can copy&' +
                'paste it here and try again if you want:\n\n' + msg;

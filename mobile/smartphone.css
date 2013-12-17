@@ -1,10 +1,86 @@
 body {
-  background: #000;
   color: #fff;
 }
 
-#sidebar, #updatestatus, #chatcontrols, #chat, #chatinput {
-  background: #0B3351 !important
+#updatestatus {
+  background: #262c32;
+  width: 100%;
+  color: #d4d5d6;
+  border: 0;
+  padding: 0;
+}
+
+#updatestatus .map {
+  margin-left: 4px;
+}
+
+#innerstatus {
+  padding: 4px;
+  float: right;
+  width: 50%;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+  -moz-box-sizing: border-box;
+  -webkit-box-sizing: border-box;
+  box-sizing: border-box;
+}
+
+#loadlevel {
+  border-width: 0;
+  background: transparent;
+  color: #FFF;
+}
+
+#mobileinfo {
+  float: left;
+  width: 50%;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+  position:relative;
+  padding: 4px 0;
+  -moz-box-sizing: border-box;
+  -webkit-box-sizing: border-box;
+  box-sizing: border-box;
+}
+
+#mobileinfo .portallevel {
+  padding: 0 0.25em;
+  color: #FFF;
+}
+
+#mobileinfo .resonator {
+  position: absolute;
+  width: 12%; /* a little less that 1/8 to have a small distance */
+  height: 100%;
+  top: 0;
+  border-top: 3px solid red;
+  box-sizing: border-box;
+  -moz-box-sizing: border-box;
+  -webkit-box-sizing: border-box;
+}
+
+#mobileinfo .filllevel {
+  position: absolute;
+  bottom: 0;
+  height: 3px;
+}
+
+#mobileinfo .enl .filllevel {
+  background-color: #03fe03 !important;
+}
+
+#mobileinfo .res .filllevel {
+  background-color: #00c5ff !important;
+}
+
+#name #signout { /* no hover, always show signout button */
+  display: block;
+}
+
+#sidebar, #chatcontrols, #chat, #chatinput {
+  background: transparent !important;
 }
 
 .leaflet-top .leaflet-control {
@@ -13,8 +89,7 @@ body {
 }
 
 .leaflet-control-layers {
-  margin-left: 0 !important;
-  margin-top: 0 !important;
+  display: none;    /* hide layer control - it's now handled by an in-app option */
 }
 
 #geosearch {
@@ -109,36 +184,32 @@ body {
   width: 100%;
 }
 
-/* base layer selection - first column */
-.leaflet-control-layers-base {
-  float: left;
+/*
+ * for some reason leaflet popups on mobile are colored white on white
+ * so force the popup msg color to black
+ */
+.leaflet-popup-content{
+    color:black;
 }
 
-/* overlays layer selection - 2nd column */
-.leaflet-control-layers-overlays {
-  float: left;
-  margin-left: 8px;
-  border-left: 1px solid #DDDDDD;
-  padding-left: 8px;
+
+/* add extra padding, and a button effect, to sidebar link areas */
+.linkdetails aside  {
+  padding: 5px;
+  margin-top: 3px;
+  margin-bottom: 3px;
+  border: 2px outset #20A8B1;
 }
 
-/* hide the usual seperator */
-.leaflet-control-layers-separator {
-  display: none;
+#toolbox > a {
+  padding: 5px;
+  margin-top: 3px;
+  margin-bottom: 3px;
+  border: 2px outset #20A8B1;
 }
 
-/* increase padding on list items - easier for touchscreens */
-/* removed for now. could consider adding it back, conditional on device screen size?
-.leaflet-control-layers-list label {
-  padding: 6px 0;
-}
-*/
-
-.leaflet-control-attribution {
-
-}
-
-#portal_highlight_select{
-  top:0px !important;
-  left:0px !important;
+#portaldetails .close {
+  padding: 4px;
+  border: 1px outset #20A8B1;
+  margin-top: 2px;
 }

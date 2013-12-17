@@ -1,134 +1,289 @@
 package com.cradle.iitc_mobile;
 
-import java.io.IOException;
-
-import com.cradle.iitc_mobile.R;
-import android.location.Location;
-import android.location.LocationListener;
-import android.location.LocationManager;
-import android.net.ConnectivityManager;
-import android.net.NetworkInfo;
-import android.net.Uri;
-import android.os.Bundle;
-import android.os.Handler;
-import android.os.StrictMode;
-import android.preference.PreferenceManager;
 import android.app.ActionBar;
 import android.app.Activity;
+import android.app.AlertDialog;
+import android.app.DownloadManager;
+import android.app.SearchManager;
+import android.content.BroadcastReceiver;
 import android.content.Context;
+import android.content.DialogInterface;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.SharedPreferences.OnSharedPreferenceChangeListener;
 import android.content.res.Configuration;
+import android.location.Location;
+import android.location.LocationListener;
+import android.location.LocationManager;
+import android.net.Uri;
+import android.os.Bundle;
+import android.os.Handler;
+import android.preference.PreferenceManager;
 import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
-import android.view.WindowManager;
+import android.view.View;
+import android.view.Window;
+import android.webkit.CookieManager;
+import android.webkit.WebView;
+import android.widget.SearchView;
 import android.widget.Toast;
 
-public class IITC_Mobile extends Activity {
+import com.cradle.iitc_mobile.IITC_NavigationHelper.Pane;
 
-    private IITC_WebView iitc_view;
-    private boolean back_button_pressed = false;
-    private OnSharedPreferenceChangeListener listener;
-    private String intel_url = "https://www.ingress.com/intel";
-    private boolean user_loc = false;
-    private LocationManager loc_mngr = null;
-    private LocationListener loc_listener = null;
-    private boolean fullscreen_mode = false;
-    private boolean fullscreen_actionbar = false;
-    private ActionBar actionBar;
+import java.io.File;
+import java.io.IOException;
+import java.net.URISyntaxException;
+import java.util.Stack;
+
+public class IITC_Mobile extends Activity implements OnSharedPreferenceChangeListener, LocationListener {
+
+    private static final int REQUEST_LOGIN = 1;
+
+    private IITC_WebView mIitcWebView;
+    private final String mIntelUrl = "https://www.ingress.com/intel";
+    private boolean mIsLocEnabled = false;
+    private Location mLastLocation = null;
+    private LocationManager mLocMngr = null;
+    private IITC_DeviceAccountLogin mLogin;
+    private MenuItem mSearchMenuItem;
+    private boolean mDesktopMode = false;
+    private boolean mAdvancedMenu = false;
+    private boolean mReloadNeeded = false;
+    private final Stack<String> mDialogStack = new Stack<String>();
+    private SharedPreferences mSharedPrefs;
+    private IITC_NavigationHelper mNavigationHelper;
+    private IITC_MapSettings mMapSettings;
+
+    private final BroadcastReceiver mBroadcastReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            ((IITC_Mobile) context).installIitcUpdate();
+        }
+    };
+
+    // Used for custom back stack handling
+    private final Stack<Pane> mBackStack = new Stack<IITC_NavigationHelper.Pane>();
+    private Pane mCurrentPane = Pane.MAP;
+    private boolean mBackButtonPressed = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // TODO build an async task for url.openStream() in IITC_WebViewClient
-        StrictMode.ThreadPolicy policy = new StrictMode.ThreadPolicy.Builder()
-                .permitAll().build();
-        StrictMode.setThreadPolicy(policy);
-        setContentView(R.layout.activity_main);
-        iitc_view = (IITC_WebView) findViewById(R.id.iitc_webview);
+        // enable progress bar above action bar
+        requestWindowFeature(Window.FEATURE_PROGRESS);
 
-        // fetch actionbar, set display flags, title and enable home button
-        actionBar = this.getActionBar();
-        actionBar.setDisplayOptions(ActionBar.DISPLAY_SHOW_HOME
-                | ActionBar.DISPLAY_USE_LOGO | ActionBar.DISPLAY_SHOW_TITLE);
-        actionBar.setTitle(getString(R.string.menu_map));
-        actionBar.setHomeButtonEnabled(true);
+        setContentView(R.layout.activity_main);
+        mIitcWebView = (IITC_WebView) findViewById(R.id.iitc_webview);
 
         // do something if user changed something in the settings
-        SharedPreferences sharedPref = PreferenceManager
-                .getDefaultSharedPreferences(this);
-        listener = new OnSharedPreferenceChangeListener() {
-            @Override
-            public void onSharedPreferenceChanged(
-                    SharedPreferences sharedPreferences, String key) {
-                if (key.equals("pref_user_loc"))
-                    user_loc = sharedPreferences.getBoolean("pref_user_loc",
-                            false);
-                if (key.equals("pref_fullscreen_actionbar")) {
-                    fullscreen_actionbar =sharedPreferences.getBoolean("pref_fullscreen_actionbar",
-                            false);
-                    if (fullscreen_mode)
-                        IITC_Mobile.this.getActionBar().hide();
-                }
-                IITC_Mobile.this.loadUrl(intel_url);
-            }
-        };
-        sharedPref.registerOnSharedPreferenceChangeListener(listener);
+        mSharedPrefs = PreferenceManager.getDefaultSharedPreferences(this);
+        mSharedPrefs.registerOnSharedPreferenceChangeListener(this);
+
+        // enable/disable mDesktopMode mode on menu create and url load
+        mDesktopMode = mSharedPrefs.getBoolean("pref_force_desktop", false);
+
+        // enable/disable advance menu
+        mAdvancedMenu = mSharedPrefs.getBoolean("pref_advanced_menu", false);
+
+        // get fullscreen status from settings
+        mIitcWebView.updateFullscreenStatus();
 
         // Acquire a reference to the system Location Manager
-        loc_mngr = (LocationManager) this
+        mLocMngr = (LocationManager) this
                 .getSystemService(Context.LOCATION_SERVICE);
 
-        // Define a listener that responds to location updates
-        loc_listener = new LocationListener() {
-            public void onLocationChanged(Location location) {
-                // Called when a new location is found by the network location
-                // provider.
-                drawMarker(location);
-            }
-
-            public void onStatusChanged(String provider, int status,
-                    Bundle extras) {
-            }
-
-            public void onProviderEnabled(String provider) {
-            }
-
-            public void onProviderDisabled(String provider) {
-            }
-        };
-
-        user_loc = sharedPref.getBoolean("pref_user_loc", false);
-        if (user_loc == true) {
-            // Register the listener with the Location Manager to receive
+        mIsLocEnabled = mSharedPrefs.getBoolean("pref_user_loc", false);
+        if (mIsLocEnabled) {
+            // Register the mSharedPrefChangeListener with the Location Manager to receive
             // location updates
-            loc_mngr.requestLocationUpdates(LocationManager.NETWORK_PROVIDER,
-                    0, 0, loc_listener);
-            loc_mngr.requestLocationUpdates(LocationManager.GPS_PROVIDER, 0, 0,
-                    loc_listener);
+            mLocMngr.requestLocationUpdates(LocationManager.NETWORK_PROVIDER,
+                    0, 0, this);
+            mLocMngr.requestLocationUpdates(LocationManager.GPS_PROVIDER, 0, 0,
+                    this);
         }
 
-        fullscreen_actionbar = sharedPref.getBoolean("pref_fullscreen_actionbar", false);
+        // pass ActionBar to helper because we deprecated getActionBar
+        mNavigationHelper = new IITC_NavigationHelper(this, super.getActionBar());
 
+        mMapSettings = new IITC_MapSettings(this);
+
+
+        // Clear the back stack
+        mBackStack.clear();
+
+        // receive downloadManagers downloadComplete intent
+        // afterwards install iitc update
+        registerReceiver(mBroadcastReceiver, new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE));
+
+        handleIntent(getIntent(), true);
+    }
+
+    // --------------------- onSharedPreferenceListener -----------------------
+    @Override
+    public void onSharedPreferenceChanged(SharedPreferences sharedPreferences, String key) {
+        if (key.equals("pref_force_desktop")) {
+            mDesktopMode = sharedPreferences.getBoolean("pref_force_desktop", false);
+            mNavigationHelper.onPrefChanged();
+        } else if (key.equals("pref_user_loc")) {
+            mIsLocEnabled = sharedPreferences.getBoolean("pref_user_loc", false);
+        } else if (key.equals("pref_fullscreen")) {
+            mIitcWebView.updateFullscreenStatus();
+            mNavigationHelper.onPrefChanged();
+            return;
+        } else if (key.equals("pref_advanced_menu")) {
+            mAdvancedMenu = sharedPreferences.getBoolean("pref_advanced_menu", false);
+            mNavigationHelper.setDebugMode(mAdvancedMenu);
+            invalidateOptionsMenu();
+            // no reload needed
+            return;
+        } else if (key.equals("pref_fake_user_agent")) {
+            mIitcWebView.setUserAgent();
+        } else if (key.equals("pref_caching")) {
+            mIitcWebView.updateCaching(false);
+        } else if (key.equals("pref_press_twice_to_exit")
+                || key.equals("pref_share_selected_tab")
+                || key.equals("pref_messages")
+                || key.equals("pref_external_storage"))
+        // no reload needed
+        {
+            return;
+        }
+
+        mReloadNeeded = true;
+    }
+    // ------------------------------------------------------------------------
+
+    // ------------------------ LocationListener ------------------------------
+    @Override
+    public void onLocationChanged(Location location) {
+        // Called when a new location is found by the network location
+        // provider.
+        drawMarker(location);
+        mLastLocation = location;
+    }
+
+    @Override
+    public void onStatusChanged(String provider, int status, Bundle extras) {
+
+    }
+
+    @Override
+    public void onProviderEnabled(String provider) {
+
+    }
+
+    @Override
+    public void onProviderDisabled(String provider) {
+
+    }
+    // ------------------------------------------------------------------------
+
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        setIntent(intent);
+        handleIntent(intent, false);
+    }
+
+    private void handleIntent(Intent intent, boolean onCreate) {
         // load new iitc web view with ingress intel page
-        Intent intent = getIntent();
         String action = intent.getAction();
         if (Intent.ACTION_VIEW.equals(action)) {
             Uri uri = intent.getData();
-            String url = uri.toString();
-            if (intent.getScheme().equals("http"))
-                url = url.replace("http://", "https://");
-            Log.d("iitcm", "intent received url: " + url);
-            if (url.contains("ingress.com")) {
-                Log.d("iitcm", "loading url...");
-                this.loadUrl(url);
+            Log.d("iitcm", "intent received url: " + uri.toString());
+
+            if (uri.getScheme().equals("http") || uri.getScheme().equals("https")) {
+                if (uri.getHost() != null
+                        && (uri.getHost().equals("ingress.com") || uri.getHost().endsWith(".ingress.com"))) {
+                    Log.d("iitcm", "loading url...");
+                    this.loadUrl(uri.toString());
+                    return;
+                }
             }
-        } else {
-            this.loadUrl(intel_url);
+
+            if (uri.getScheme().equals("geo")) {
+                try {
+                    handleGeoUri(uri);
+                    return;
+                } catch (URISyntaxException e) {
+                    e.printStackTrace();
+                    new AlertDialog.Builder(this)
+                            .setTitle(R.string.intent_error)
+                            .setMessage(e.getReason())
+                            .setNeutralButton(android.R.string.ok, new DialogInterface.OnClickListener() {
+                                @Override
+                                public void onClick(DialogInterface dialog, int which) {
+                                    dialog.dismiss();
+                                }
+                            })
+                            .create()
+                            .show();
+                }
+            }
         }
+
+        if (Intent.ACTION_SEARCH.equals(action)) {
+            String query = intent.getStringExtra(SearchManager.QUERY);
+            query = query.replace("'", "''");
+            final SearchView searchView =
+                    (SearchView) mSearchMenuItem.getActionView();
+            searchView.setQuery(query, false);
+            searchView.clearFocus();
+
+            switchToPane(Pane.MAP);
+            mIitcWebView.loadUrl("javascript:search('" + query + "');");
+            return;
+        }
+
+        if (onCreate) {
+            this.loadUrl(mIntelUrl);
+        }
+    }
+
+    private void handleGeoUri(Uri uri) throws URISyntaxException {
+        String[] parts = uri.getSchemeSpecificPart().split("\\?", 2);
+        Double lat, lon;
+        Integer z = null;
+
+        // parts[0] may contain an 'uncertainty' parameter, delimited by a semicolon
+        String[] pos = parts[0].split(";", 2)[0].split(",", 2);
+        if (pos.length != 2) {
+            throw new URISyntaxException(uri.toString(), "URI does not contain a valid position");
+        }
+
+        try {
+            lat = Double.valueOf(pos[0]);
+            lon = Double.valueOf(pos[1]);
+        } catch (NumberFormatException e) {
+            URISyntaxException use = new URISyntaxException(uri.toString(), "position could not be parsed");
+            use.initCause(e);
+            throw use;
+        }
+
+        if (parts.length > 1) { // query string present
+            // search for z=
+            for (String param : parts[1].split("&")) {
+                if (param.startsWith("z=")) {
+                    try {
+                        z = Integer.valueOf(param.substring(2));
+                    } catch (NumberFormatException e) {
+                        URISyntaxException use = new URISyntaxException(uri.toString(), "could not parse zoom level");
+                        use.initCause(e);
+                        throw use;
+                    }
+                    break;
+                }
+            }
+        }
+
+        String url = "http://www.ingress.com/intel?ll=" + lat + "," + lon;
+        if (z != null) {
+            url += "&z=" + z;
+        }
+        this.loadUrl(url);
     }
 
     @Override
@@ -136,175 +291,242 @@ public class IITC_Mobile extends Activity {
         super.onResume();
 
         // enough idle...let's do some work
-        Log.d("iitcm", "resuming...setting reset idleTimer");
-        iitc_view.loadUrl("javascript: window.idleTime = 0");
-        iitc_view.loadUrl("javascript: window.renderUpdateStatus()");
-        iitc_view.updateCaching();
+        Log.d("iitcm", "resuming...reset idleTimer");
+        mIitcWebView.updateCaching(false);
 
-        if (user_loc == true) {
-            // Register the listener with the Location Manager to receive
+        if (mIsLocEnabled) {
+            // Register the mSharedPrefChangeListener with the Location Manager to receive
             // location updates
-            loc_mngr.requestLocationUpdates(LocationManager.NETWORK_PROVIDER,
-                    0, 0, loc_listener);
-            loc_mngr.requestLocationUpdates(LocationManager.GPS_PROVIDER, 0, 0,
-                    loc_listener);
+            mLocMngr.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 0, 0, this);
+            mLocMngr.requestLocationUpdates(LocationManager.GPS_PROVIDER, 0, 0, this);
+        }
+
+        if (mReloadNeeded) {
+            Log.d("iitcm", "preference had changed...reload needed");
+            reloadIITC();
+        } else {
+            // iitc is not fully booted...timer will be reset by the script itself
+            if (findViewById(R.id.imageLoading).getVisibility() == View.GONE) {
+                mIitcWebView.loadUrl("javascript: window.idleReset();");
+            }
         }
     }
 
     @Override
     protected void onStop() {
-        ConnectivityManager conMan = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
-
-        NetworkInfo mobile = conMan
-                .getNetworkInfo(ConnectivityManager.TYPE_MOBILE);
-        NetworkInfo wifi = conMan.getNetworkInfo(ConnectivityManager.TYPE_WIFI);
-
-        // check if Mobile or Wifi module is available..then handle states
-        // TODO: theory...we do not have to check for a Wifi module...every
-        // android device should have one
-        if (mobile != null) {
-            Log.d("iitcm", "mobile internet module detected...check states");
-            if (mobile.getState() == NetworkInfo.State.CONNECTED
-                    || mobile.getState() == NetworkInfo.State.CONNECTING) {
-                Log.d("iitcm",
-                        "connected to mobile net...abort all running requests");
-                // cancel all current requests
-                iitc_view.loadUrl("javascript: window.requests.abort()");
-                // set idletime to maximum...no need for more
-                iitc_view.loadUrl("javascript: window.idleTime = 999");
-            } else if (wifi.getState() == NetworkInfo.State.CONNECTED
-                    || wifi.getState() == NetworkInfo.State.CONNECTING) {
-                iitc_view.loadUrl("javascript: window.idleTime = 999");
-            }
-        } else {
-            Log.d("iitcm",
-                    "no mobile internet module detected...check wifi state");
-            if (wifi.getState() == NetworkInfo.State.CONNECTED
-                    || wifi.getState() == NetworkInfo.State.CONNECTING) {
-                iitc_view.loadUrl("javascript: window.idleTime = 999");
-            }
-        }
         Log.d("iitcm", "stopping iitcm");
+        mIitcWebView.loadUrl("javascript: window.idleSet();");
 
-        if (user_loc == true)
-            loc_mngr.removeUpdates(loc_listener);
+        if (mIsLocEnabled) {
+            mLocMngr.removeUpdates(this);
+        }
 
         super.onStop();
+    }
+
+    @Override
+    protected void onDestroy() {
+        unregisterReceiver(mBroadcastReceiver);
+        super.onDestroy();
     }
 
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
 
+        mNavigationHelper.onConfigurationChanged(newConfig);
+
         Log.d("iitcm", "configuration changed...restoring...reset idleTimer");
-        iitc_view.loadUrl("javascript: window.idleTime = 0");
-        iitc_view.loadUrl("javascript: window.renderUpdateStatus()");
+        mIitcWebView.loadUrl("javascript: window.idleTime = 0");
+        mIitcWebView.loadUrl("javascript: window.renderUpdateStatus()");
+    }
+
+    @Override
+    protected void onPostCreate(Bundle savedInstanceState) {
+        super.onPostCreate(savedInstanceState);
+        mNavigationHelper.onPostCreate(savedInstanceState);
     }
 
     // we want a self defined behavior for the back button
     @Override
     public void onBackPressed() {
-        // exit fullscreen mode if it is enabled
-        if (fullscreen_mode) {
-            this.toggleFullscreen();
+        // exit fullscreen mode if it is enabled and action bar is disabled or the back stack is empty
+        if (mIitcWebView.isInFullscreen() && mBackStack.isEmpty()) {
+            mIitcWebView.toggleFullscreen();
             return;
         }
-        if (this.back_button_pressed) {
+
+        // close drawer if opened
+        if (mNavigationHelper.isDrawerOpened()) {
+            mNavigationHelper.closeDrawers();
+            return;
+        }
+
+        // kill all open iitc dialogs
+        if (!mDialogStack.isEmpty()) {
+            String id = mDialogStack.pop();
+            mIitcWebView.loadUrl("javascript: " +
+                    "var selector = $(window.DIALOGS['" + id + "']); " +
+                    "selector.dialog('close'); " +
+                    "selector.remove();");
+            return;
+        }
+
+        // Pop last item from backstack and pretend the relevant menu item was clicked
+        if (!mBackStack.isEmpty()) {
+            backStackPop();
+            mBackButtonPressed = true;
+            return;
+        }
+
+        if (mBackButtonPressed || !mSharedPrefs.getBoolean("pref_press_twice_to_exit", false)) {
             super.onBackPressed();
-            return;
+        } else {
+            mBackButtonPressed = true;
+            Toast.makeText(this, "Press twice to exit", Toast.LENGTH_SHORT).show();
+            // reset back button after 2 seconds
+            new Handler().postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    mBackButtonPressed = false;
+                }
+            }, 2000);
+        }
+    }
+
+    public void backStackPop() {
+        // shouldn't be called when back stack is empty
+        // catch wrong usage
+        if (mBackStack.isEmpty()) {
+            mBackStack.push(Pane.MAP);
         }
 
-        iitc_view.loadUrl("javascript: window.goBack();");
-        this.back_button_pressed = true;
-        Toast.makeText(this, "Press twice to exit", Toast.LENGTH_SHORT).show();
+        Pane pane = mBackStack.pop();
+        switchToPane(pane);
+    }
 
-        // reset back button after 0.5 seconds
-        new Handler().postDelayed(new Runnable() {
-            @Override
-            public void run() {
-                back_button_pressed = false;
-            }
-        }, 500);
+    public void setCurrentPane(Pane pane) {
+        // ensure no double adds
+        if (pane == mCurrentPane) return;
+
+        // map pane is top-lvl. clear stack.
+        if (pane == Pane.MAP) mBackStack.clear();
+        // don't push current pane to backstack if this method was called via back button
+        else if (!mBackButtonPressed) mBackStack.push(mCurrentPane);
+
+        mBackButtonPressed = false;
+        mCurrentPane = pane;
+        mNavigationHelper.switchTo(pane);
+    }
+
+    public void switchToPane(Pane pane) {
+        mIitcWebView.loadUrl("javascript: window.show('" + pane.name + "');");
     }
 
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
         // Inflate the menu; this adds items to the action bar if it is present.
         getMenuInflater().inflate(R.menu.main, menu);
-
+        // Get the SearchView and set the searchable configuration
+        SearchManager searchManager = (SearchManager) getSystemService(Context.SEARCH_SERVICE);
+        mSearchMenuItem = menu.findItem(R.id.menu_search);
+        final SearchView searchView =
+                (SearchView) mSearchMenuItem.getActionView();
+        // Assumes current activity is the searchable activity
+        searchView.setSearchableInfo(searchManager.getSearchableInfo(getComponentName()));
+        searchView.setIconifiedByDefault(false); // Do not iconify the widget; expand it by default
         return true;
     }
 
     @Override
+    public boolean onPrepareOptionsMenu(Menu menu) {
+        if (mNavigationHelper != null) {
+            boolean visible = !mNavigationHelper.isDrawerOpened();
+
+            for (int i = 0; i < menu.size(); i++)
+                if (menu.getItem(i).getItemId() != R.id.action_settings) {
+                    // clear cookies is part of the advanced menu
+                    if (menu.getItem(i).getItemId() == R.id.menu_clear_cookies) {
+                        menu.getItem(i).setVisible(mAdvancedMenu & visible);
+                    } else {
+                        menu.getItem(i).setVisible(visible);
+                    }
+                }
+        }
+
+        return super.onPrepareOptionsMenu(menu);
+    }
+
+    @Override
     public boolean onOptionsItemSelected(MenuItem item) {
+        if (mNavigationHelper.onOptionsItemSelected(item)) {
+            return true;
+        }
+
         // Handle item selection
-        switch (item.getItemId()) {
-            case android.R.id.home :
-                iitc_view.loadUrl("javascript: window.show('map');");
-                actionBar.setTitle(getString(R.string.menu_map));
+        final int itemId = item.getItemId();
+
+        switch (itemId) {
+            case android.R.id.home:
+                switchToPane(Pane.MAP);
                 return true;
-            case R.id.menu_map :
-                iitc_view.loadUrl("javascript: window.show('map');");
-                actionBar.setTitle(getString(R.string.menu_map));
+            case R.id.reload_button:
+                reloadIITC();
                 return true;
-            case R.id.reload_button :
-                this.loadUrl(intel_url);
-                actionBar.setTitle(getString(R.string.menu_map));
+            case R.id.toggle_fullscreen:
+                mIitcWebView.toggleFullscreen();
                 return true;
-                // clear cache
-            case R.id.cache_clear :
-                iitc_view.clearHistory();
-                iitc_view.clearFormData();
-                iitc_view.clearCache(true);
+            case R.id.layer_chooser:
+                mNavigationHelper.openRightDrawer();
                 return true;
-            case R.id.toggle_fullscreen :
-                toggleFullscreen();
+            case R.id.locate: // get the users current location and focus it on map
+                switchToPane(Pane.MAP);
+                // get location from network by default
+                if (!mIsLocEnabled) {
+                    mIitcWebView.loadUrl("javascript: " +
+                            "window.map.locate({setView : true, maxZoom: 15});");
+                    // if gps location is displayed we can use a better location without any costs
+                } else {
+                    if (mLastLocation != null) {
+                        mIitcWebView.loadUrl("javascript: window.map.setView(new L.LatLng(" +
+                                mLastLocation.getLatitude() + "," +
+                                mLastLocation.getLongitude() + "), 15);");
+                    }
+                }
                 return true;
-                // get the users current location and focus it on map
-            case R.id.locate :
-                iitc_view.loadUrl("javascript: window.show('map');");
-                iitc_view.loadUrl("javascript: window.map.locate({setView : true, maxZoom: 15});");
-                actionBar.setTitle(getString(R.string.menu_map));
-                return true;
-                // start settings activity
-            case R.id.action_settings :
-                Intent intent = new Intent(this, IITC_Settings.class);
-                intent.putExtra("iitc_version", iitc_view.getWebViewClient()
+            case R.id.action_settings: // start settings activity
+                Intent intent = new Intent(this, IITC_PreferenceActivity.class);
+                intent.putExtra("iitc_version", mIitcWebView.getWebViewClient()
                         .getIITCVersion());
                 startActivity(intent);
                 return true;
-            case R.id.menu_info :
-                iitc_view.loadUrl("javascript: window.show('info');");
-                actionBar.setTitle(getString(R.string.menu_info));
+            case R.id.menu_clear_cookies:
+                CookieManager cm = CookieManager.getInstance();
+                cm.removeAllCookie();
                 return true;
-            case R.id.menu_full :
-                iitc_view.loadUrl("javascript: window.show('full');");
-                actionBar.setTitle(getString(R.string.menu_full));
-                return true;
-            case R.id.menu_compact :
-                iitc_view.loadUrl("javascript: window.show('compact');");
-                actionBar.setTitle(getString(R.string.menu_compact));
-                return true;
-            case R.id.menu_public :
-                iitc_view.loadUrl("javascript: window.show('public');");
-                actionBar.setTitle(getString(R.string.menu_public));
-                return true;
-            case R.id.menu_faction :
-                iitc_view.loadUrl("javascript: window.show('faction');");
-                actionBar.setTitle(getString(R.string.menu_faction));
-                return true;
-            case R.id.menu_debug :
-                iitc_view.loadUrl("javascript: window.show('debug')");
-                actionBar.setTitle(getString(R.string.menu_debug));
-                return true;
-            default :
-                return super.onOptionsItemSelected(item);
+            default:
+                return false;
         }
     }
 
-    private void injectJS() {
+    @Override
+    public File getCacheDir() {
+        return getApplicationContext().getCacheDir();
+    }
+
+    public void reloadIITC() {
+        mNavigationHelper.reset();
+        mMapSettings.reset();
+        mBackStack.clear();
+        // iitc starts on map after reload
+        mCurrentPane = Pane.MAP;
+        loadUrl(mIntelUrl);
+        mReloadNeeded = false;
+    }
+
+    private void loadIITC() {
         try {
-            iitc_view.getWebViewClient().loadIITC_JS(this);
+            mIitcWebView.getWebViewClient().loadIITC_JS(this);
         } catch (IOException e1) {
             e1.printStackTrace();
         } catch (NullPointerException e2) {
@@ -312,19 +534,22 @@ public class IITC_Mobile extends Activity {
         }
     }
 
-    // Force mobile view.
-    // New actions are not compatible with desktop mode
+    // vp=f enables mDesktopMode mode...vp=m is the default mobile view
     private String addUrlParam(String url) {
-        return (url + "?vp=m");
+        if (mDesktopMode) {
+            return (url + "?vp=f");
+        } else {
+            return (url + "?vp=m");
+        }
     }
 
     // inject the iitc-script and load the intel url
     // plugins are injected onPageFinished
     public void loadUrl(String url) {
+        setLoadingState(true);
         url = addUrlParam(url);
-        Log.d("iitcm", "injecting main-script...");
-        injectJS();
-        iitc_view.loadUrl(url);
+        loadIITC();
+        mIitcWebView.loadUrl(url);
     }
 
     // update the user location marker on the map
@@ -332,32 +557,132 @@ public class IITC_Mobile extends Activity {
         // throw away all positions with accuracy > 100 meters
         // should avoid gps glitches
         if (loc.getAccuracy() < 100) {
-            iitc_view.loadUrl("javascript: "
-                    + "window.plugin.userLocation.updateLocation( "
-                    + loc.getLatitude() + ", " + loc.getLongitude() + ");");
+            // do not touch the javascript while iitc boots
+            if (findViewById(R.id.imageLoading).getVisibility() == View.GONE) {
+                mIitcWebView.loadUrl("javascript: "
+                        + "window.plugin.userLocation.updateLocation( "
+                        + loc.getLatitude() + ", " + loc.getLongitude() + ");");
+            }
         }
-    }
-
-    public void toggleFullscreen() {
-        if (fullscreen_mode) {
-            if (fullscreen_actionbar)
-                this.getActionBar().show();
-            this.fullscreen_mode = false;
-        } else {
-            if (fullscreen_actionbar)
-                this.getActionBar().hide();
-            this.fullscreen_mode = true;
-            // show a toast with instructions to exit the fc mode again
-            Toast.makeText(this, "Press back button to exit fullscreen",
-                    Toast.LENGTH_SHORT).show();
-        }
-        // toggle notification bar
-        WindowManager.LayoutParams attrs = getWindow().getAttributes();
-        attrs.flags ^= WindowManager.LayoutParams.FLAG_FULLSCREEN;
-        this.getWindow().setAttributes(attrs);
     }
 
     public IITC_WebView getWebView() {
-        return this.iitc_view;
+        return this.mIitcWebView;
+    }
+
+    /**
+     * It can occur that in order to authenticate, an external activity has to be launched.
+     * (This could for example be a confirmation dialog.)
+     */
+    public void startLoginActivity(Intent launch) {
+        startActivityForResult(launch, REQUEST_LOGIN); // REQUEST_LOGIN is to recognize the result
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        switch (requestCode) {
+            case REQUEST_LOGIN:
+                // authentication activity has returned. mLogin will continue authentication
+                mLogin.onActivityResult(resultCode, data);
+                break;
+            default:
+                super.onActivityResult(requestCode, resultCode, data);
+        }
+    }
+
+    /**
+     * called by IITC_WebViewClient when the Google login form is opened.
+     */
+    public void onReceivedLoginRequest(IITC_WebViewClient client, WebView view,
+                                       String realm, String account, String args) {
+        mLogin = new IITC_DeviceAccountLogin(this, view, client);
+        mLogin.startLogin(realm, account, args);
+    }
+
+    /**
+     * called after successful login
+     */
+    public void loginSucceeded() {
+        // garbage collection
+        mLogin = null;
+        setLoadingState(true);
+    }
+
+    // remove dialog and add it back again
+    // to ensure it is the last element of the list
+    // focused dialogs should be closed first
+    public void setFocusedDialog(String id) {
+        Log.d("iitcm", "Dialog " + id + " focused");
+        mDialogStack.remove(id);
+        mDialogStack.push(id);
+    }
+
+    // called by the javascript interface
+    public void dialogOpened(String id, boolean open) {
+        if (open) {
+            Log.d("iitcm", "Dialog " + id + " added");
+            mDialogStack.push(id);
+        } else {
+            Log.d("iitcm", "Dialog " + id + " closed");
+            mDialogStack.remove(id);
+        }
+    }
+
+    public void setLoadingState(boolean isLoading) {
+        mNavigationHelper.setLoadingState(isLoading);
+
+        if (isLoading && !mSharedPrefs.getBoolean("pref_disable_splash", false)) {
+            findViewById(R.id.iitc_webview).setVisibility(View.GONE);
+            findViewById(R.id.imageLoading).setVisibility(View.VISIBLE);
+        } else {
+            findViewById(R.id.iitc_webview).setVisibility(View.VISIBLE);
+            findViewById(R.id.imageLoading).setVisibility(View.GONE);
+        }
+    }
+
+    private void deleteUpdateFile() {
+        File file = new File(getExternalFilesDir(null).toString() + "/iitcUpdate.apk");
+        if (file != null) file.delete();
+    }
+
+    public void updateIitc(String url) {
+        DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
+        request.setDescription("downloading IITCm update apk...");
+        request.setTitle("IITCm Update");
+        request.allowScanningByMediaScanner();
+        Uri fileUri = Uri.parse("file://" + getExternalFilesDir(null).toString() + "/iitcUpdate.apk");
+        request.setDestinationUri(fileUri);
+        // remove old update file...we don't want to spam the external storage
+        deleteUpdateFile();
+        // get download service and enqueue file
+        DownloadManager manager = (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
+        manager.enqueue(request);
+    }
+
+    private void installIitcUpdate() {
+        String iitcUpdatePath = getExternalFilesDir(null).toString() + "/iitcUpdate.apk";
+        Intent intent = new Intent(Intent.ACTION_VIEW);
+        intent.setDataAndType(Uri.fromFile(new File(iitcUpdatePath)), "application/vnd.android.package-archive");
+        startActivity(intent);
+        // finish app, because otherwise it gets killed on update
+        finish();
+    }
+
+    /**
+     * @see getNavigationHelper()
+     * @deprecated ActionBar related stuff should be handled by IITC_NavigationHelper
+     */
+    @Deprecated
+    @Override
+    public ActionBar getActionBar() {
+        return super.getActionBar();
+    }
+
+    public IITC_NavigationHelper getNavigationHelper() {
+        return mNavigationHelper;
+    }
+
+    public IITC_MapSettings getMapSettings() {
+        return mMapSettings;
     }
 }

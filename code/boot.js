@@ -1,49 +1,32 @@
-// SETUP /////////////////////////////////////////////////////////////
+/// SETUP /////////////////////////////////////////////////////////////
 // these functions set up specific areas after the boot function
 // created a basic framework. All of these functions should only ever
 // be run once.
 
 // Used to disable on multitouch devices
 window.showZoom = true;
-
-window.setupBackButton = function() {
-  var c = window.isSmartphone()
-    ? window.smartphone.mapButton
-    : $('#chatcontrols a.active');
-
-  window.setupBackButton._actions = [c.get(0)];
-  $('#chatcontrols a').click(function() {
-    // ignore shrink button
-    if($(this).hasClass('toggle')) return;
-    window.setupBackButton._actions.push(this);
-    window.setupBackButton._actions = window.setupBackButton._actions.slice(-2);
-  });
-
-  window.goBack = function() {
-    var a = window.setupBackButton._actions[0];
-    if(!a) return;
-    $(a).click();
-    window.setupBackButton._actions = [a];
-  }
-}
+window.showLayerChooser = true;
 
 window.setupLargeImagePreview = function() {
   $('#portaldetails').on('click', '.imgpreview', function() {
     var img = $(this).find('img')[0];
-    var w = img.naturalWidth, c = $('#portaldetails').attr('class');
-    var d = dialog({
-      html: '<span class="' + c + '" style="position: relative; width: 100%; left: 50%; margin-left: ' + -(w / 2) + 'px;">' + img.outerHTML + '</span>',
-      title: $(this).parent().find('h3.title').html()
-    });
-
-    // We have to dynamically set the width of this dialog, so get the .ui-dialog component
-    var p = d.parents('.ui-dialog');
-
-    // Don't let this dialog get smaller than the default maximum dialog width
-    var width = Math.max(parseInt(p.css('max-width')), w);
-    p.css('min-width', width + 'px');
-    p.css('width', width + 'px');
-   });
+    var details = $(this).find('div.portalDetails')[0];
+    //dialogs have 12px padding around the content
+    var dlgWidth = Math.max(img.naturalWidth+24,500);
+    if (details) {
+      dialog({
+        html: '<div style="text-align: center">' + img.outerHTML + '</div>' + details.outerHTML,
+        title: $(this).parent().find('h3.title').text(),
+        width: dlgWidth,
+      });
+    } else {
+      dialog({
+        html: '<div style="text-align: center">' + img.outerHTML + '</div>',
+        title: $(this).parent().find('h3.title').text(),
+        width: dlgWidth,
+      });
+    }
+  });
 }
 
 // adds listeners to the layer chooser such that a long press hides
@@ -93,14 +76,10 @@ window.setupLayerChooserStatusRecorder = function() {
   });
 
   // Record layerGroups change
-  window.map.on('layeradd layerremove', function(e) {
-    var id = L.stamp(e.layer);
-    var layerGroup = this._layers[id];
-    if (layerGroup && layerGroup.overlay) {
-      var display = (e.type === 'layeradd');
-      window.updateDisplayedLayerGroup(layerGroup.name, display);
-    }
-  }, window.layerChooser);
+  window.map.on('overlayadd overlayremove', function(e) {
+    var display = (e.type === 'overlayadd');
+    window.updateDisplayedLayerGroup(e.name, display);
+  });
 }
 
 window.setupStyles = function() {
@@ -125,16 +104,6 @@ window.setupMap = function() {
   //OpenStreetMap attribution - required by several of the layers
   osmAttribution = 'Map data © OpenStreetMap contributors';
 
-  //OpenStreetMap tiles - we shouldn't use these by default, or even an option - https://wiki.openstreetmap.org/wiki/Tile_usage_policy
-  // "Heavy use (e.g. distributing an app that uses tiles from openstreetmap.org) is forbidden without prior permission from the System Administrators"
-  //var osmOpt = {attribution: osmAttribution, maxZoom: 18, detectRetina: true};
-  //var osm = new L.TileLayer('http://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', osmOpt);
-
-  //CloudMade layers - only 500,000 tiles/month in their free plan. nowhere near enough for IITC
-  var cmOpt = {attribution: osmAttribution+', Imagery © CloudMade', maxZoom: 18, detectRetina: true};
-  //var cmMin = new L.TileLayer('http://{s}.tile.cloudmade.com/{your api key here}/22677/256/{z}/{x}/{y}.png', cmOpt);
-  //var cmMid = new L.TileLayer('http://{s}.tile.cloudmade.com/{your api key here}/999/256/{z}/{x}/{y}.png', cmOpt);
-
   //MapQuest offer tiles - http://developer.mapquest.com/web/products/open/map
   //their usage policy has no limits (except required notification above 4000 tiles/sec - we're perhaps at 50 tiles/sec based on CloudMade stats)
   var mqSubdomains = [ 'otile1','otile2', 'otile3', 'otile4' ];
@@ -142,29 +111,49 @@ window.setupMap = function() {
   var mqMapOpt = {attribution: osmAttribution+', Tiles Courtesy of MapQuest', maxZoom: 18, subdomains: mqSubdomains};
   var mqMap = new L.TileLayer(mqTileUrlPrefix+'/tiles/1.0.0/map/{z}/{x}/{y}.jpg',mqMapOpt);
   //MapQuest satellite coverage outside of the US is rather limited - so not really worth having as we have google as an option
-  //var mqSatOpt = {attribution: 'Portions Courtesy NASA/JPL-Caltech and U.S. Depart. of Agriculture, Farm Service Agency', mazZoom: 18, subdomains: mqSubdomains};
+  //var mqSatOpt = {attribution: 'Portions Courtesy NASA/JPL-Caltech and U.S. Depart. of Agriculture, Farm Service Agency', maxZoom: 18, subdomains: mqSubdomains};
   //var mqSat = new L.TileLayer('http://{s}.mqcdn.com/tiles/1.0.0/sat/{z}/{x}/{y}.jpg',mqSatOpt);
+
+  var ingressGMapOptions = {
+    backgroundColor: '#0e3d4e', //or #dddddd ? - that's the Google tile layer default
+    styles: [
+        { featureType:"all", elementType:"all",
+          stylers: [{visibility:"on"}, {hue:"#131c1c"}, {saturation:"-50"}, {invert_lightness:true}] },
+        { featureType:"water", elementType:"all",
+          stylers: [{visibility:"on"}, {hue:"#005eff"}, {invert_lightness:true}] },
+        { featureType:"poi", stylers:[{visibility:"off"}]},
+        { featureType:"transit", elementType:"all", stylers:[{visibility:"off"}] }
+      ]
+  };
+
 
   var views = [
     /*0*/ mqMap,
-    /*1*/ new L.Google('INGRESS',{maxZoom:20}),
+    /*1*/ new L.Google('ROADMAP',{maxZoom:20, mapOptions:ingressGMapOptions}),
     /*2*/ new L.Google('ROADMAP',{maxZoom:20}),
     /*3*/ new L.Google('SATELLITE',{maxZoom:20}),
     /*4*/ new L.Google('HYBRID',{maxZoom:20}),
     /*5*/ new L.Google('TERRAIN',{maxZoom:15})
   ];
 
+  // proper initial position is now delayed until all plugins are loaded and the base layer is set
+  window.map = new L.Map('map', {center: [0,0], zoom: 1, zoomControl: window.showZoom, minZoom: 1});
 
-  window.map = new L.Map('map', $.extend(getPosition(),
-    {zoomControl: window.showZoom}
-  ));
+  // add empty div to leaflet control areas - to force other leaflet controls to move around IITC UI elements
+  // TODO? move the actual IITC DOM into the leaflet control areas, so dummy <div>s aren't needed
+  if(!isSmartphone()) {
+    // chat window area
+    $(window.map._controlCorners['bottomleft']).append($('<div>').width(708).height(108).addClass('leaflet-control').css('margin','0'));
+  }
 
   var addLayers = {};
   var hiddenLayer = [];
 
-  portalsLayers = [];
+  portalsFactionLayers = [];
+  var portalsLayers = [];
   for(var i = 0; i <= 8; i++) {
-    portalsLayers[i] = L.layerGroup([]);
+    portalsFactionLayers[i] = [L.layerGroup(), L.layerGroup(), L.layerGroup()];
+    portalsLayers[i] = L.layerGroup(portalsFactionLayers[i]);
     map.addLayer(portalsLayers[i]);
     var t = (i === 0 ? 'Unclaimed' : 'Level ' + i) + ' Portals';
     addLayers[t] = portalsLayers[i];
@@ -172,26 +161,83 @@ window.setupMap = function() {
     if(!isLayerGroupDisplayed(t, true)) hiddenLayer.push(portalsLayers[i]);
   }
 
-  fieldsLayer = L.layerGroup([]);
+  fieldsFactionLayers = [L.layerGroup(), L.layerGroup(), L.layerGroup()];
+  var fieldsLayer = L.layerGroup(fieldsFactionLayers);
   map.addLayer(fieldsLayer, true);
   addLayers['Fields'] = fieldsLayer;
   // Store it in hiddenLayer to remove later
   if(!isLayerGroupDisplayed('Fields', true)) hiddenLayer.push(fieldsLayer);
 
-  linksLayer = L.layerGroup([]);
+  linksFactionLayers = [L.layerGroup(), L.layerGroup(), L.layerGroup()];
+  var linksLayer = L.layerGroup(linksFactionLayers);
   map.addLayer(linksLayer, true);
   addLayers['Links'] = linksLayer;
   // Store it in hiddenLayer to remove later
   if(!isLayerGroupDisplayed('Links', true)) hiddenLayer.push(linksLayer);
 
+  // faction-specific layers
+  // these layers don't actually contain any data. instead, every time they're added/removed from the map,
+  // the matching sub-layers within the above portals/fields/links are added/removed from their parent with
+  // the below 'onoverlayadd/onoverlayremovve' events
+  var factionLayers = [L.layerGroup(), L.layerGroup(), L.layerGroup()];
+  for (var fac in factionLayers) {
+    map.addLayer (factionLayers[fac]);
+  }
+
+  var setFactionLayersState = function(fac,enabled) {
+    if (enabled) {
+      if (!fieldsLayer.hasLayer(fieldsFactionLayers[fac])) fieldsLayer.addLayer (fieldsFactionLayers[fac]);
+      if (!linksLayer.hasLayer(linksFactionLayers[fac])) linksLayer.addLayer (linksFactionLayers[fac]);
+      for (var lvl in portalsLayers) {
+        if (!portalsLayers[lvl].hasLayer(portalsFactionLayers[lvl][fac])) portalsLayers[lvl].addLayer (portalsFactionLayers[lvl][fac]);
+      }
+    } else {
+      if (fieldsLayer.hasLayer(fieldsFactionLayers[fac])) fieldsLayer.removeLayer (fieldsFactionLayers[fac]);
+      if (linksLayer.hasLayer(linksFactionLayers[fac])) linksLayer.removeLayer (linksFactionLayers[fac]);
+      for (var lvl in portalsLayers) {
+        if (portalsLayers[lvl].hasLayer(portalsFactionLayers[lvl][fac])) portalsLayers[lvl].removeLayer (portalsFactionLayers[lvl][fac]);
+      }
+    }
+  }
+
+  // to avoid any favouritism, we'll put the player's own faction layer first
+  if (PLAYER.team == 'RESISTANCE') {
+    addLayers['Resistance'] = factionLayers[TEAM_RES];
+    addLayers['Enlightened'] = factionLayers[TEAM_ENL];
+  } else {
+    addLayers['Enlightened'] = factionLayers[TEAM_ENL];
+    addLayers['Resistance'] = factionLayers[TEAM_RES];
+  }
+  if (!isLayerGroupDisplayed('Resistance', true)) hiddenLayer.push (factionLayers[TEAM_RES]);
+  if (!isLayerGroupDisplayed('Enlightened', true)) hiddenLayer.push (factionLayers[TEAM_ENL]);
+
+  setFactionLayersState (TEAM_NONE, true);
+  setFactionLayersState (TEAM_RES, isLayerGroupDisplayed('Resistance', true));
+  setFactionLayersState (TEAM_ENL, isLayerGroupDisplayed('Enlightened', true));
+
+  // NOTE: these events are fired by the layer chooser, so won't happen until that's created and added to the map
+  window.map.on('overlayadd overlayremove', function(e) {
+    var displayed = (e.type == 'overlayadd');
+    switch (e.name) {
+      case 'Resistance':
+        setFactionLayersState (TEAM_RES, displayed);
+        break;
+      case 'Enlightened':
+        setFactionLayersState (TEAM_ENL, displayed);
+        break;
+    }
+  });
+
+
   window.layerChooser = new L.Control.Layers({
     'MapQuest OSM': views[0],
-    'Default Ingress Map': views[1],
+    'Google Default Ingress Map': views[1],
     'Google Roads':  views[2],
     'Google Satellite':  views[3],
     'Google Hybrid':  views[4],
     'Google Terrain': views[5]
     }, addLayers);
+
   // Remove the hidden layer after layerChooser built, to avoid messing up ordering of layers 
   $.each(hiddenLayer, function(ind, layer){
     map.removeLayer(layer);
@@ -199,62 +245,99 @@ window.setupMap = function() {
 
   map.addControl(window.layerChooser);
 
-  // set the map AFTER adding the layer chooser, or Chrome reorders the
-  // layers. This likely leads to broken layer selection because the
-  // views/cookie order does not match the layer chooser order.
-  try {
-    convertCookieToLocalStorage('ingress.intelmap.type');
-    map.addLayer(views[localStorage['ingress.intelmap.type']]);
-  } catch(e) { map.addLayer(views[0]); }
-
   map.attributionControl.setPrefix('');
   // listen for changes and store them in cookies
   map.on('moveend', window.storeMapPosition);
-  map.on('zoomend', function() {
-    window.storeMapPosition();
 
-    // remove all resonators if zoom out to < RESONATOR_DISPLAY_ZOOM_LEVEL
-    if(isResonatorsShow()) return;
-    for(var i = 1; i < portalsLayers.length; i++) {
-      portalsLayers[i].eachLayer(function(item) {
-        var itemGuid = item.options.guid;
-        // check if 'item' is a resonator
-        if(getTypeByGuid(itemGuid) != TYPE_RESONATOR) return true;
-        portalsLayers[i].removeLayer(item);
-      });
+  map.on('moveend', function(e) {
+    // two limits on map position
+    // we wrap longitude (the L.LatLng 'wrap' method) - so we don't find ourselves looking beyond +-180 degrees
+    // then latitude is clamped with the clampLatLng function (to the 85 deg north/south limits)
+    var newPos = clampLatLng(map.getCenter().wrap());
+    if (!map.getCenter().equals(newPos)) {
+      map.panTo(newPos,{animate:false})
     }
-
-    console.log('Remove all resonators');
   });
 
-  map.on('baselayerchange', function () {
-    var selInd = $('[name=leaflet-base-layers]:checked').parent().index();
-    localStorage['ingress.intelmap.type']=selInd;
+  // map update status handling & update map hooks
+  // ensures order of calls
+  map.on('movestart', function() { window.mapRunsUserAction = true; window.requests.abort(); window.startRefreshTimeout(-1); });
+  map.on('moveend', function() { window.mapRunsUserAction = false; window.startRefreshTimeout(ON_MOVE_REFRESH*1000); });
+
+  // on zoomend, check to see the zoom level is an int, and reset the view if not
+  // (there's a bug on mobile where zoom levels sometimes end up as fractional levels. this causes the base map to be invisible)
+  map.on('zoomend', function() {
+    var z = map.getZoom();
+    if (z != parseInt(z))
+    {
+      console.warn('Non-integer zoom level at zoomend: '+z+' - trying to fix...');
+      map.setZoom(parseInt(z), {animate:false});
+    }
   });
 
-  // map update status handling
-  map.on('movestart zoomstart', function() { window.mapRunsUserAction = true });
-  map.on('moveend zoomend', function() { window.mapRunsUserAction = false });
 
-  // update map hooks
-  map.on('movestart zoomstart', function() { window.requests.abort(); window.startRefreshTimeout(-1); });
-  map.on('moveend zoomend', function() { window.startRefreshTimeout(ON_MOVE_REFRESH*1000) });
+  // set a 'moveend' handler for the map to clear idle state. e.g. after mobile 'my location' is used.
+  // possibly some cases when resizing desktop browser too
+  map.on('moveend', idleReset);
 
-  window.addResumeFunction(window.requestData);
-  window.requests.addRefreshFunction(window.requestData);
+  window.addResumeFunction(function() { window.startRefreshTimeout(ON_MOVE_REFRESH*1000); });
+
+  // create the map data requester
+  window.mapDataRequest = new MapDataRequest();
+  window.mapDataRequest.start();
 
   // start the refresh process with a small timeout, so the first data request happens quickly
   // (the code originally called the request function directly, and triggered a normal delay for the nxt refresh.
   //  however, the moveend/zoomend gets triggered on map load, causing a duplicate refresh. this helps prevent that
   window.startRefreshTimeout(ON_MOVE_REFRESH*1000);
-
 };
+
+//adds a base layer to the map. done separately from the above, so that plugins that add base layers can be the default
+window.setMapBaseLayer = function() {
+  //create a map name -> layer mapping - depends on internals of L.Control.Layers
+  var nameToLayer = {};
+  var firstLayer = null;
+
+  for (i in window.layerChooser._layers) {
+    var obj = window.layerChooser._layers[i];
+    if (!obj.overlay) {
+      nameToLayer[obj.name] = obj.layer;
+      if (!firstLayer) firstLayer = obj.layer;
+    }
+  }
+
+  var baseLayer = nameToLayer[localStorage['iitc-base-map']] || firstLayer;
+  map.addLayer(baseLayer);
+
+  // now we have a base layer we can set the map position
+  // (setting an initial position, before a base layer is added, causes issues with leaflet)
+  var pos = getPosition();
+  map.setView (pos.center, pos.zoom, {reset:true});
+
+
+  //event to track layer changes and store the name
+  map.on('baselayerchange', function(info) {
+    for(i in window.layerChooser._layers) {
+      var obj = window.layerChooser._layers[i];
+      if (info.layer === obj.layer) {
+        localStorage['iitc-base-map'] = obj.name;
+        break;
+      }
+    }
+
+    //also, leaflet no longer ensures the base layer zoom is suitable for the map (a bug? feature change?), so do so here
+    map.setZoom(map.getZoom());
+
+
+  });
+
+
+}
 
 // renders player details into the website. Since the player info is
 // included as inline script in the original site, the data is static
 // and cannot be updated.
 window.setupPlayerStat = function() {
-  PLAYER.guid = playerNameToGuid(PLAYER.nickname);
   var level;
   var ap = parseInt(PLAYER.ap);
   for(level = 0; level < MIN_AP_FOR_LEVEL.length; level++) {
@@ -271,14 +354,14 @@ window.setupPlayerStat = function() {
   var xmMax = MAX_XM_PER_LEVEL[level];
   var xmRatio = Math.round(PLAYER.energy/xmMax*100);
 
-  var cls = PLAYER.team === 'ALIENS' ? 'enl' : 'res';
+  var cls = PLAYER.team === 'RESISTANCE' ? 'res' : 'enl';
 
 
   var t = 'Level:\t' + level + '\n'
         + 'XM:\t' + PLAYER.energy + ' / ' + xmMax + '\n'
         + 'AP:\t' + digits(ap) + '\n'
         + (level < 8 ? 'level up in:\t' + lvlUpAp + ' AP' : 'Congrats! (neeeeerd)')
-        + '\n\Invites:\t'+PLAYER.available_invites;
+        + '\n\Invites:\t'+PLAYER.available_invites
         + '\n\nNote: your player stats can only be updated by a full reload (F5)';
 
   $('#playerstat').html(''
@@ -293,12 +376,6 @@ window.setupPlayerStat = function() {
     + '</div>'
     + '</h2>'
   );
-
-  $('#name').mouseenter(function() {
-    $('#signout').show();
-  }).mouseleave(function() {
-    $('#signout').hide();
-  });
 }
 
 window.setupSidebarToggle = function() {
@@ -349,6 +426,81 @@ window.setupQRLoadLib = function() {
   @@INCLUDERAW:external/jquery.qrcode.min.js@@
 }
 
+window.setupLayerChooserApi = function() {
+  // hide layer chooser on mobile devices running desktop mode
+  if (!window.showLayerChooser) {
+    $('.leaflet-control-layers').hide();
+  }
+
+  //hook some additional code into the LayerControl so it's easy for the mobile app to interface with it
+  //WARNING: does depend on internals of the L.Control.Layers code
+  window.layerChooser.getLayers = function() {
+    var baseLayers = new Array();
+    var overlayLayers = new Array();
+
+    for (i in this._layers) {
+      var obj = this._layers[i];
+      var layerActive = window.map.hasLayer(obj.layer);
+      var info = {
+        layerId: L.stamp(obj.layer),
+        name: obj.name,
+        active: layerActive
+      }
+      if (obj.overlay) {
+        overlayLayers.push(info);
+      } else {
+        baseLayers.push(info);
+      }
+    }
+
+    var overlayLayersJSON = JSON.stringify(overlayLayers);
+    var baseLayersJSON = JSON.stringify(baseLayers);
+
+    if (typeof android !== 'undefined' && android && android.setLayers) {
+        android.setLayers(baseLayersJSON, overlayLayersJSON);
+    }
+
+    return {
+      baseLayers: baseLayers,
+      overlayLayers: overlayLayers
+    }
+  }
+
+  window.layerChooser.showLayer = function(id,show) {
+    if (show === undefined) show = true;
+    obj = this._layers[id];
+    if (!obj) return false;
+
+    if(show) {
+      if (!this._map.hasLayer(obj.layer)) {
+        //the layer to show is not currently active
+        this._map.addLayer(obj.layer);
+
+        //if it's a base layer, remove any others
+        if (!obj.overlay) {
+          for(i in this._layers) {
+            if (i != id) {
+              var other = this._layers[i];
+              if (!other.overlay && this._map.hasLayer(other.layer)) this._map.removeLayer(other.layer);
+            }
+          }
+        }
+      }
+    } else {
+      if (this._map.hasLayer(obj.layer)) {
+        this._map.removeLayer(obj.layer);
+      }
+    }
+
+    //below logic based on code in L.Control.Layers _onInputClick
+    if(!obj.overlay) {
+      this._map.setZoom(this._map.getZoom());
+      this._map.fire('baselayerchange', {layer: obj.layer});
+    }
+
+    return true;
+  }
+}
 
 // BOOTING ///////////////////////////////////////////////////////////
 
@@ -374,6 +526,7 @@ function boot() {
     shadowSize: new L.Point(41, 41)
   }});
 
+  window.setupIdle();
   window.setupTaphold();
   window.setupStyles();
   window.setupDialogs();
@@ -383,13 +536,14 @@ function boot() {
   window.setupLargeImagePreview();
   window.setupSidebarToggle();
   window.updateGameScore();
+  window.artifact.setup();
   window.setupPlayerStat();
   window.setupTooltips();
   window.chat.setup();
+  window.portalDetail.setup();
   window.setupQRLoadLib();
   window.setupLayerChooserSelectOne();
   window.setupLayerChooserStatusRecorder();
-  window.setupBackButton();
   // read here ONCE, so the URL is only evaluated one time after the
   // necessary data has been loaded.
   urlPortalLL = getURLParam('pll');
@@ -410,37 +564,43 @@ function boot() {
       try {
         ref();
       } catch(err) {
-        console.log("error starting plugin: index "+ind+", error: "+err);
+        console.error("error starting plugin: index "+ind+", error: "+err);
       }
     });
+
+  window.setMapBaseLayer();
+  window.setupLayerChooserApi();
 
   window.runOnSmartphonesAfterBoot();
 
   // workaround for #129. Not sure why this is required.
-  setTimeout('window.map.invalidateSize(false);', 500);
+//  setTimeout('window.map.invalidateSize(false);', 500);
 
   window.iitcLoaded = true;
   window.runHooks('iitcLoaded');
+
+  if (typeof android !== 'undefined' && android && android.bootFinished) {
+    android.bootFinished();
+  }
+
 }
 
-// this is the minified load.js script that allows us to easily load
-// further javascript files async as well as in order.
-// https://github.com/chriso/load.js
-// Copyright (c) 2010 Chris O'Hara <cohara87@gmail.com>. MIT Licensed
-function asyncLoadScript(a){return function(b,c){var d=document.createElement("script");d.type="text/javascript",d.src=a,d.onload=b,d.onerror=c,d.onreadystatechange=function(){var a=this.readyState;if(a==="loaded"||a==="complete")d.onreadystatechange=null,b()},head.insertBefore(d,head.firstChild)}}(function(a){a=a||{};var b={},c,d;c=function(a,d,e){var f=a.halt=!1;a.error=function(a){throw a},a.next=function(c){c&&(f=!1);if(!a.halt&&d&&d.length){var e=d.shift(),g=e.shift();f=!0;try{b[g].apply(a,[e,e.length,g])}catch(h){a.error(h)}}return a};for(var g in b){if(typeof a[g]=="function")continue;(function(e){a[e]=function(){var g=Array.prototype.slice.call(arguments);if(e==="onError"){if(d)return b.onError.apply(a,[g,g.length]),a;var h={};return b.onError.apply(h,[g,g.length]),c(h,null,"onError")}return g.unshift(e),d?(a.then=a[e],d.push(g),f?a:a.next()):c({},[g],e)}})(g)}return e&&(a.then=a[e]),a.call=function(b,c){c.unshift(b),d.unshift(c),a.next(!0)},a.next()},d=a.addMethod=function(d){var e=Array.prototype.slice.call(arguments),f=e.pop();for(var g=0,h=e.length;g<h;g++)typeof e[g]=="string"&&(b[e[g]]=f);--h||(b["then"+d.substr(0,1).toUpperCase()+d.substr(1)]=f),c(a)},d("chain",function(a){var b=this,c=function(){if(!b.halt){if(!a.length)return b.next(!0);try{null!=a.shift().call(b,c,b.error)&&c()}catch(d){b.error(d)}}};c()}),d("run",function(a,b){var c=this,d=function(){c.halt||--b||c.next(!0)},e=function(a){c.error(a)};for(var f=0,g=b;!c.halt&&f<g;f++)null!=a[f].call(c,d,e)&&d()}),d("defer",function(a){var b=this;setTimeout(function(){b.next(!0)},a.shift())}),d("onError",function(a,b){var c=this;this.error=function(d){c.halt=!0;for(var e=0;e<b;e++)a[e].call(c,d)}})})(this);var head=document.getElementsByTagName("head")[0]||document.documentElement;addMethod("load",function(a,b){for(var c=[],d=0;d<b;d++)(function(b){c.push(asyncLoadScript(a[b]))})(d);this.call("run",c)})
+
+@@INCLUDERAW:external/load.js@@
 
 try { console.log('Loading included JS now'); } catch(e) {}
 @@INCLUDERAW:external/leaflet.js@@
+@@INCLUDERAW:external/L.Geodesic.js@@
 // modified version of https://github.com/shramov/leaflet-plugins. Also
 // contains the default Ingress map style.
-@@INCLUDERAW:external/leaflet_google.js@@
+@@INCLUDERAW:external/Google.js@@
 @@INCLUDERAW:external/autolink.js@@
 
 try { console.log('done loading included JS'); } catch(e) {}
 
 //note: no protocol - so uses http or https as used on the current page
-var JQUERY = 'https://ajax.googleapis.com/ajax/libs/jquery/1.7.1/jquery.min.js';
-var JQUERYUI = 'https://ajax.googleapis.com/ajax/libs/jqueryui/1.10.0/jquery-ui.min.js';
+var JQUERY = '//ajax.googleapis.com/ajax/libs/jquery/2.0.3/jquery.min.js';
+var JQUERYUI = '//ajax.googleapis.com/ajax/libs/jqueryui/1.10.3/jquery-ui.min.js';
 
 // after all scripts have loaded, boot the actual app
 load(JQUERY).then(JQUERYUI).thenRun(boot);

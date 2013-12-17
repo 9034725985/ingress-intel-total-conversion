@@ -1,7 +1,8 @@
 // ==UserScript==
 // @id             iitc-plugin-portal-level-numbers@rongou
 // @name           IITC plugin: Portal Level Numbers
-// @version        0.1.0.@@DATETIMEVERSION@@
+// @category       Layer
+// @version        0.1.2.@@DATETIMEVERSION@@
 // @namespace      https://github.com/jonatkins/ingress-intel-total-conversion
 // @updateURL      @@UPDATEURL@@
 // @downloadURL    @@DOWNLOADURL@@
@@ -10,12 +11,10 @@
 // @include        http://www.ingress.com/intel*
 // @match          https://www.ingress.com/intel*
 // @match          http://www.ingress.com/intel*
+// @grant          none
 // ==/UserScript==
 
-function wrapper() {
-// ensure plugin framework is there, even if iitc is not yet loaded
-if(typeof window.plugin !== 'function') window.plugin = function() {};
-
+@@PLUGINSTART@@
 
 // PLUGIN START ////////////////////////////////////////////////////////
 
@@ -23,7 +22,7 @@ if(typeof window.plugin !== 'function') window.plugin = function() {};
 window.plugin.portalLevelNumbers = function() {};
 
 window.plugin.portalLevelNumbers.levelLayers = {};
-window.plugin.portalLevelNumbers.levelLayerGroup = new L.LayerGroup();
+window.plugin.portalLevelNumbers.levelLayerGroup = null;
 
 // Use portal add and remove event to control render of portal level numbers
 window.plugin.portalLevelNumbers.portalAdded = function(data) {
@@ -39,8 +38,8 @@ window.plugin.portalLevelNumbers.portalAdded = function(data) {
 window.plugin.portalLevelNumbers.renderLevel = function(guid,latLng) {
     plugin.portalLevelNumbers.removeLevel(guid);
 
-    var d = window.portals[guid].options.details;
-    var levelNumber = Math.floor(window.getPortalLevel(d));
+    var p = window.portals[guid];
+    var levelNumber = p.options.level;
     var level = L.marker(latLng, {
       icon: L.divIcon({
         className: 'plugin-portal-level-numbers',
@@ -77,24 +76,13 @@ var setup =  function() {
           }")
   .appendTo("head");
 
-  window.layerChooser.addOverlay(window.plugin.portalLevelNumbers.levelLayerGroup, 'Portal Levels');
-  map.addLayer(window.plugin.portalLevelNumbers.levelLayerGroup);
+  window.plugin.portalLevelNumbers.levelLayerGroup = new L.LayerGroup();
+
+  window.addLayerGroup('Portal Levels', window.plugin.portalLevelNumbers.levelLayerGroup, true);
 
   window.addHook('portalAdded', window.plugin.portalLevelNumbers.portalAdded);
 }
 
 // PLUGIN END //////////////////////////////////////////////////////////
 
-if(window.iitcLoaded && typeof setup === 'function') {
-  setup();
-} else {
-  if(window.bootPlugins)
-    window.bootPlugins.push(setup);
-  else
-    window.bootPlugins = [setup];
-}
-} // wrapper end
-// inject code into site context
-var script = document.createElement('script');
-script.appendChild(document.createTextNode('('+ wrapper +')();'));
-(document.body || document.head || document.documentElement).appendChild(script);
+@@PLUGINEND@@

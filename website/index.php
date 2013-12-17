@@ -60,10 +60,34 @@ if ( file_exists ( 'tracking.php' ) )
 
  <!-- **** top alert box **** -->
  <div class="alert alert-block alert-info">
-  IITC now has a
-  <a href="https://plus.google.com/105383756361375410867"><img src="//ssl.gstatic.com/images/icons/gplus-16.png" alt="Google+" style="border:0;width:16px;height:16px;"/> Google+ page</a>.
-  Follow this to keep up to date on the latest news.
+  Follow the
+  <b><a href="https://plus.google.com/105383756361375410867">IITC <img src="//ssl.gstatic.com/images/icons/gplus-16.png" alt="Google+" style="border:0;width:16px;height:16px;"/> page</a></b>
+  for release announcements.
+  Join the
+  <b><a href="https://plus.google.com/communities/105647403088015055797">IITC <img src="//ssl.gstatic.com/images/icons/gplus-16.png" alt="Google+" style="border:0;width:16px;height:16px;"/> Community</a></b>
+  - a place to ask for help and discuss with other users.
  </div>
+
+ <!-- **** alert box when standard intel site changes **** -->
+ <?php
+ if ( file_exists ( "flag-stock-site-changed.txt" ) )
+ {
+ ?>
+ <div class="alert alert-block alert-error">
+  <b>Note</b>: A change has been detected to the standard intel website. Such changes usually break IITC.
+  The developers have been notified of the update, and will be looking to fix things as soon as possible.
+  See the <a href="https://plus.google.com/communities/105647403088015055797">IITC Community</a>
+  for the latest details.
+ </div>
+ <?php
+ }
+ ?>
+<!--
+ <div class="alert alert-block alert-error">
+  <b>IITC has yet again been broken by changes Niantic have made.</b> Further information/discussion on
+  <a href="xxxxxxxxxxxxxxxxxxx">this Google+ post</a>.
+ </div>
+-->
 
  <!-- **** two column body area **** -->
 
@@ -78,8 +102,8 @@ $pages = Array (
 	'home' => '<i class="icon-home"></i> Home',
 	'news' => '<i class="icon-list"></i> News',
 	'faq' => '<i class="icon-question-sign"></i> FAQ',
-	'desktop' => '<i class="icon-chevron-right"></i> Desktop',
-	'mobile' => '<i class="icon-chevron-right"></i> Mobile',
+	'desktop' => '<i class="icon-chevron-desktop"></i> Desktop',
+	'mobile' => '<i class="icon-chevron-mobile"></i> Mobile',
 	'test' => '<i class="icon-wrench"></i> Test Builds',
 	'developer' => '<i class="icon-cog"></i> Developers',
 	'about' => '<i class="icon-info-sign"></i> About',
@@ -106,7 +130,7 @@ foreach ( $pages as $key => $name )
 
 	print "<li".($page == $key ? ' class="active"' :'')."><a href=\"$url\">$name</a></li>\n";
 
-	# after 'mobile', add a horizontal seperator
+	# after 'mobile', add a horizontal separator
 	if ( $key == 'test' )
 		print "<li class=\"divider\"></li>";
 }

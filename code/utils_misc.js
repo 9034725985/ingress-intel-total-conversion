@@ -1,9 +1,38 @@
 // UTILS + MISC  ///////////////////////////////////////////////////////
 
-window.aboutIITC = function(){
-  var v = '@@BUILDNAME@@-@@BUILDDATE@@';
+window.aboutIITC = function() {
+  var v = (script_info.script && script_info.script.version || script_info.dateTimeVersion) + ' ['+script_info.buildName+']';
+  if (typeof android !== 'undefined' && android && android.getVersionName) {
+    v += '[IITC Mobile '+android.getVersionName()+']';
+  }
+
+  var plugins = '<ul>';
+  for (var i in bootPlugins) {
+    var info = bootPlugins[i].info;
+    if (info) {
+      var pname = info.script && info.script.name || info.pluginId;
+      if (pname.substr(0,13) == 'IITC plugin: ' || pname.substr(0,13) == 'IITC Plugin: ') {
+        pname = pname.substr(13);
+      }
+      var pvers = info.script && info.script.version || info.dateTimeVersion;
+
+      var ptext = pname + ' - ' + pvers;
+      if (info.buildName != script_info.buildName) {
+        ptext += ' ['+(info.buildName||'<i>non-standard plugin</i>')+']';
+      }
+
+      plugins += '<li>'+ptext+'</li>';
+    } else {
+      // no 'info' property of the plugin setup function - old plugin wrapper code
+      // could attempt to find the "window.plugin.NAME = function() {};" line it's likely to have..?
+      plugins += '<li>(unknown plugin: index '+i+')</li>';
+    }
+  }
+  plugins += '</ul>';
+
   var attrib = '@@INCLUDEMD:ATTRIBUTION.md@@';
   var contrib = '@@INCLUDEMD:CONTRIBS.md@@'
+
   var a = ''
   + '  <div><b>About IITC</b></div> '
   + '  <div>Ingress Intel Total Conversion</div> '
@@ -23,10 +52,12 @@ window.aboutIITC = function(){
   + '  </div>'
   + '  <hr>'
   + '  <div>Version: ' + v + '</div>'
+  + '  <div>Plugins: ' + plugins + '</div>'
   + '  <hr>'
   + '  <div>' + attrib + '</div>'
   + '  <hr>'
   + '  <div>' + contrib + '</div>';
+
   dialog({
     title: 'IITC ' + v,
     html: a,
@@ -94,6 +125,8 @@ window.digits = function(d) {
   return (d+"").replace(/(\d)(?=(\d\d\d)+(?!\d))/g, "$1 ");
 }
 
+
+
 // posts AJAX request to Ingress API.
 // action: last part of the actual URL, the rpc/dashboard. is
 //         added automatically
@@ -104,11 +137,20 @@ window.digits = function(d) {
 //          able arguments: http://api.jquery.com/jQuery.ajax/
 // error: see above. Additionally it is logged if the request failed.
 window.postAjax = function(action, data, success, error) {
-  var post_data = JSON.stringify($.extend({method: 'dashboard.'+action}, data));
+
+  var methodName = 'dashboard.'+action;
+  var versionStr = 'version_parameter';
+
+  // munging of the method name - seen in Set 2 onwards
+  methodName = mungeOneString(methodName);
+  // and of the 'version' parameter (we assume it's a version - if missing/wrong that's what the error refers to)
+  versionStr = mungeOneString(versionStr);
+
+  var post_data = JSON.stringify(window.requestDataMunge($.extend({}, data, {method: methodName, version: versionStr})));
   var remove = function(data, textStatus, jqXHR) { window.requests.remove(jqXHR); };
   var errCnt = function(jqXHR) { window.failedRequestCount++; window.requests.remove(jqXHR); };
   var result = $.ajax({
-    url: '/rpc/dashboard.'+action,
+    url: '/r/'+methodName,
     type: 'POST',
     data: post_data,
     context: data,
@@ -124,18 +166,34 @@ window.postAjax = function(action, data, success, error) {
   return result;
 }
 
-// converts unix timestamps to HH:mm:ss format if it was today;
+window.zeroPad = function(number,pad) {
+  number = number.toString();
+  var zeros = pad - number.length;
+  return Array(zeros>0?zeros+1:0).join("0") + number;
+}
+
+
+// converts javascript timestamps to HH:mm:ss format if it was today;
 // otherwise it returns YYYY-MM-DD
 window.unixTimeToString = function(time, full) {
   if(!time) return null;
   var d = new Date(typeof time === 'string' ? parseInt(time) : time);
   var time = d.toLocaleTimeString();
-  var date = d.getFullYear()+'-'+(d.getMonth()+1)+'-'+d.getDate();
+  var date = d.getFullYear()+'-'+zeroPad(d.getMonth()+1,2)+'-'+zeroPad(d.getDate(),2);
   if(typeof full !== 'undefined' && full) return date + ' ' + time;
   if(d.toDateString() == new Date().toDateString())
     return time;
   else
     return date;
+}
+
+// converts a javascript time to a precise date and time (optionally with millisecond precision)
+// formatted in ISO-style YYYY-MM-DD hh:mm:ss.mmm - but using local timezone
+window.unixTimeToDateTimeString = function(time, millisecond) {
+  if(!time) return null;
+  var d = new Date(typeof time === 'string' ? parseInt(time) : time);
+  return d.getFullYear()+'-'+zeroPad(d.getMonth()+1,2)+'-'+zeroPad(d.getDate(),2)
+    +' '+d.toLocaleTimeString()+(millisecond?'.'+zeroPad(d.getMilliseconds(),3):'');
 }
 
 window.unixTimeToHHmm = function(time) {
@@ -146,33 +204,59 @@ window.unixTimeToHHmm = function(time) {
   return  h + ':' + s;
 }
 
+window.formatInterval = function(seconds,maxTerms) {
+
+  var d = Math.floor(seconds / 86400);
+  var h = Math.floor((seconds % 86400) / 3600);
+  var m = Math.floor((seconds % 3600) / 60);
+  var s = seconds % 60;
+
+  var terms = [];
+  if (d > 0) terms.push(d+'d');
+  if (h > 0) terms.push(h+'h');
+  if (m > 0) terms.push(m+'m');
+  if (s > 0 || terms.length==0) terms.push(s+'s');
+
+  if (maxTerms) terms = terms.slice(0,maxTerms);
+
+  return terms.join(' ');
+}
+
+
 window.rangeLinkClick = function() {
   if(window.portalRangeIndicator)
     window.map.fitBounds(window.portalRangeIndicator.getBounds());
-  if(window.isSmartphone)
-    window.smartphone.mapButton.click();
+  if(window.isSmartphone())
+    window.show('map');
 }
 
 window.showPortalPosLinks = function(lat, lng, name) {
-  var encoded_name = '';
+  var encoded_name = 'undefined';
   if(name !== undefined) {
-    encoded_name = encodeURIComponent(' (' + name + ')');
+    encoded_name = encodeURIComponent(name);
   }
+
   if (typeof android !== 'undefined' && android && android.intentPosLink) {
-    android.intentPosLink(lat, lng, encoded_name);
+    android.intentPosLink(lat, lng, map.getZoom(), name, true);
   } else {
     var qrcode = '<div id="qrcode"></div>';
     var script = '<script>$(\'#qrcode\').qrcode({text:\'GEO:'+lat+','+lng+'\'});</script>';
-    var gmaps = '<a href="https://maps.google.com/?q='+lat+','+lng+encoded_name+'">Google Maps</a>';
+    var gmaps = '<a href="https://maps.google.com/?q='+lat+','+lng+'%20('+encoded_name+')">Google Maps</a>';
+    var bingmaps = '<a href="http://www.bing.com/maps/?v=2&cp='+lat+'~'+lng+'&lvl=16&sp=Point.'+lat+'_'+lng+'_'+encoded_name+'___">Bing Maps</a>';
     var osm = '<a href="http://www.openstreetmap.org/?mlat='+lat+'&mlon='+lng+'&zoom=16">OpenStreetMap</a>';
     var latLng = '<span>&lt;' + lat + ',' + lng +'&gt;</span>';
     dialog({
-      html: '<div style="text-align: center;">' + qrcode + script + gmaps + '; ' + osm + '<br />' + latLng + '</div>',
+      html: '<div style="text-align: center;">' + qrcode + script + gmaps + '; ' + bingmaps + '; ' + osm + '<br />' + latLng + '</div>',
       title: name,
       id: 'poslinks'
     });
   }
 }
+
+window.isTouchDevice = function() {
+  return 'ontouchstart' in window // works on most browsers
+      || 'onmsgesturechange' in window; // works on ie10
+};
 
 window.androidCopy = function(text) {
   if(typeof android === 'undefined' || !android || !android.copy)
@@ -182,59 +266,31 @@ window.androidCopy = function(text) {
   return false;
 }
 
-window.reportPortalIssue = function(info) {
-  var t = 'Redirecting you to a Google Help Page.\n\nThe text box contains all necessary information. Press CTRL+C to copy it.';
-  var d = window.portals[window.selectedPortal].options.details;
+window.androidPermalink = function() {
+  if(typeof android === 'undefined' || !android || !android.intentPosLink)
+    return true; // i.e. execute other actions
 
-  var info = 'Your Nick: ' + PLAYER.nickname + '        '
-    + 'Portal: ' + d.portalV2.descriptiveText.TITLE + '        '
-    + 'Location: ' + d.portalV2.descriptiveText.ADDRESS
-    +' (lat ' + (d.locationE6.latE6/1E6) + '; lng ' + (d.locationE6.lngE6/1E6) + ')';
-
-  //codename, approx addr, portalname
-  if(prompt(t, info) !== null)
-    location.href = 'https://support.google.com/ingress?hl=en&contact=1';
+  var center = map.getCenter();
+  android.intentPosLink(center.lat, center.lng, map.getZoom(), "Selected map view", false);
+  return false;
 }
 
-window._storedPaddedBounds = undefined;
-window.getPaddedBounds = function() {
-  if(_storedPaddedBounds === undefined) {
-    map.on('zoomstart zoomend movestart moveend', function() {
-      window._storedPaddedBounds = null;
-    });
-  }
-  if(renderLimitReached(0.7)) return window.map.getBounds();
-  if(window._storedPaddedBounds) return window._storedPaddedBounds;
 
-  var p = window.map.getBounds().pad(VIEWPORT_PAD_RATIO);
-  window._storedPaddedBounds = p;
-  return p;
+window.getMinPortalLevelForZoom = function(z) {
+
+  // these values are from the stock intel map. however, they're too detailed for reasonable speed, and increasing
+  // detail at a higher zoom level shows enough detail still, AND speeds up IITC considerably
+//var ZOOM_TO_LEVEL = [8, 8, 8, 8, 7, 7, 6, 6, 5, 4, 4, 3, 3, 2, 2, 1, 1];
+  var ZOOM_TO_LEVEL = [8, 8, 8, 8, 8, 7, 7, 7, 6, 5, 4, 4, 3, 2, 2, 1, 1];
+
+  var l = ZOOM_TO_LEVEL[z] || 0;
+  return l;
 }
 
-// returns true if the render limit has been reached. The default ratio
-// is 1, which means it will tell you if there are more items drawn than
-// acceptable. A value of 0.9 will tell you if 90% of the amount of
-// acceptable entities have been drawn. You can use this to heuristi-
-// cally detect if the render limit will be hit.
-window.renderLimitReached = function(ratio) {
-  ratio = ratio || 1;
-  if(Object.keys(portals).length*ratio >= MAX_DRAWN_PORTALS) return true;
-  if(Object.keys(links).length*ratio >= MAX_DRAWN_LINKS) return true;
-  if(Object.keys(fields).length*ratio >= MAX_DRAWN_FIELDS) return true;
-  var param = { 'reached': false };
-  window.runHooks('checkRenderLimit', param);
-  return param.reached;
-}
 
 window.getMinPortalLevel = function() {
   var z = map.getZoom();
-  if(z >= 17) return 0;
-  var conv = ['impossible', 8,8,8,7,7,6,6,5,4,4,3,3,2,2,1,1];
-  var minLevelByRenderLimit = portalRenderLimit.getMinLevel();
-  var result = minLevelByRenderLimit > conv[z]
-    ? minLevelByRenderLimit
-    : conv[z];
-  return result;
+  return getMinPortalLevelForZoom(z);
 }
 
 // returns number of pixels left to scroll down before reaching the
@@ -254,45 +310,6 @@ window.zoomToAndShowPortal = function(guid, latlng) {
     urlPortal = guid;
 }
 
-// translates guids to entity types
-window.getTypeByGuid = function(guid) {
-  // portals end in “.11” or “.12“, links in “.9", fields in “.b”
-  // .11 == portals
-  // .12 == portals
-  // .16 == portals
-  // .9  == links
-  // .b  == fields
-  // .c  == player/creator
-  // .d  == chat messages
-  //
-  // others, not used in web:
-  // .5  == resources (burster/resonator)
-  // .6  == XM
-  // .4  == media items, maybe all droppped resources (?)
-  // resonator guid is [portal guid]-resonator-[slot]
-  switch(guid.slice(33)) {
-    case '11':
-    case '12':
-    case '16':
-      return TYPE_PORTAL;
-
-    case '9':
-      return TYPE_LINK;
-
-    case 'b':
-      return TYPE_FIELD;
-
-    case 'c':
-      return TYPE_PLAYER;
-
-    case 'd':
-      return TYPE_CHAT;
-
-    default:
-      if(guid.slice(-11,-2) == 'resonator') return TYPE_RESONATOR;
-      return TYPE_UNKNOWN;
-  }
-}
 
 String.prototype.capitalize = function() {
     return this.charAt(0).toUpperCase() + this.slice(1).toLowerCase();
@@ -309,6 +326,14 @@ if (typeof String.prototype.startsWith !== 'function') {
 // (for strings passed as parameters to html onclick="..." for example)
 window.escapeJavascriptString = function(str) {
   return (str+'').replace(/[\\"']/g,'\\$&');
+}
+
+//escape special characters, such as tags
+window.escapeHtmlSpecialChars = function(str) {
+  var div = document.createElement(div);
+  var text = document.createTextNode(str);
+  div.appendChild(text);
+  return div.innerHTML;
 }
 
 window.prettyEnergy = function(nrg) {
@@ -407,3 +432,48 @@ window.addLayerGroup = function(name, layerGroup, defaultDisplay) {
   if(isLayerGroupDisplayed(name, defaultDisplay)) map.addLayer(layerGroup);
   layerChooser.addOverlay(layerGroup, name);
 }
+
+window.clampLat = function(lat) {
+  // the map projection used does not handle above approx +- 85 degrees north/south of the equator
+  if (lat > 85.051128)
+    lat = 85.051128;
+  else if (lat < -85.051128)
+    lat = -85.051128;
+  return lat;
+}
+
+window.clampLng = function(lng) {
+  if (lng > 179.999999)
+    lng = 179.999999;
+  else if (lng < -180.0)
+    lng = -180.0;
+  return lng;
+}
+
+
+window.clampLatLng = function(latlng) {
+  return new L.LatLng ( clampLat(latlng.lat), clampLng(latlng.lng) );
+}
+
+window.clampLatLngBounds = function(bounds) {
+  return new L.LatLngBounds ( clampLatLng(bounds.getSouthWest()), clampLatLng(bounds.getNorthEast()) );
+}
+
+// avoid error in stock JS
+if(goog && goog.style) {
+  goog.style.showElement = function(a, b) {
+    if(a && a.style)
+      a.style.display = b ? "" : "none"
+  };
+}
+
+// Fix Leaflet: handle touchcancel events in Draggable
+L.Draggable.prototype._onDownOrig = L.Draggable.prototype._onDown;
+L.Draggable.prototype._onDown = function(e) {
+  L.Draggable.prototype._onDownOrig.apply(this, arguments);
+
+  if(e.type === "touchstart") {
+    L.DomEvent.on(document, "touchcancel", this._onUp, this);
+  }
+}
+
